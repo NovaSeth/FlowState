@@ -9,10 +9,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        # node:sqlite (DatabaseSync) is available from Node 22.5; test the
-        # floor version that ships it plus the current major.
-        node: ["22.5.0", "24.x"]
+        # node:sqlite (DatabaseSync) ships from Node 22.5, but the dev toolchain
+        # (vitest 4 -> vite 8 / rolldown) requires >=22.12, so 22.12 is the real
+        # floor we can install and test on. Test that floor plus the current major.
+        node: ["22.12.0", "24.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
