@@ -1,0 +1,255 @@
+{
+  "app": {
+    "name": "Flow State",
+    "brandLead": "Flow",
+    "brandRest": " State",
+    "description": "Progress dashboard for Claude Code projects"
+  },
+  "nav": {
+    "overview": "Overview",
+    "explorer": "Explorer",
+    "users": "Users",
+    "settings": "Settings",
+    "menu": "Main menu"
+  },
+  "common": {
+    "back": "Back",
+    "confirm": "Sure?",
+    "close": "Close",
+    "loading": "Loading",
+    "loadingEllipsis": "Loading...",
+    "saveError": "Save error",
+    "archived": "Archived"
+  },
+  "time": {
+    "justNow": "just now",
+    "minsAgo": "{n} min ago",
+    "hoursAgo": "{n} h ago",
+    "daysAgo": "{n} days ago",
+    "monthsAgo": "{n} mo ago"
+  },
+  "meta": {
+    "blockedByCount": "Blocked by {n} unclosed tasks",
+    "subtasksProgress": "Subtasks: {done} of {total} done"
+  },
+  "units": {
+    "projShort": "{n} proj.",
+    "milestoneShort": "{n} ms.",
+    "taskShort": "{n} tasks"
+  },
+  "status": {
+    "todo": "To do",
+    "in_progress": "In progress",
+    "blocked": "Blocked",
+    "done": "Done",
+    "closed": "Closed"
+  },
+  "priority": {
+    "none": "None",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "urgent": "Urgent"
+  },
+  "projectStatus": {
+    "active": "Active",
+    "paused": "Paused",
+    "done": "Completed",
+    "archived": "Archived"
+  },
+  "solutionStatus": {
+    "active": "Active",
+    "archived": "Archived"
+  },
+  "blockerType": {
+    "dependency": "dependency",
+    "external": "external",
+    "decision": "decision"
+  },
+  "milestoneOutcome": {
+    "shipped": "Shipped",
+    "infeasible": "Infeasible",
+    "descoped": "Descoped"
+  },
+  "solution": {
+    "projects": "Projects"
+  },
+  "overview": {
+    "solutions": "Solutions",
+    "projects": "Projects",
+    "milestones": "Milestones",
+    "tasks": "Tasks",
+    "completed": "Completed",
+    "needsAttention": "Needs attention",
+    "needsAttentionHint": "Tasks blocked or urgent across all projects.",
+    "nothingBlocking": "Nothing blocking. All clear.",
+    "recentActivity": "Recent activity",
+    "noActivity": "No activity.",
+    "noProjectsInSolution": "No projects in this solution.",
+    "recent": "Recently",
+    "dailyChartTitle": "Completed per day",
+    "dailyChartEmpty": "No completed tasks yet. Close a task to see it here.",
+    "dailyChartUnit": "{n} tasks"
+  },
+  "explorer": {
+    "solutions": "Solutions",
+    "projects": "Projects",
+    "milestones": "Milestones",
+    "tasks": "Tasks",
+    "list": "List",
+    "kanban": "Kanban",
+    "emptyKanbanColumn": "None",
+    "noSolutions": "No solutions. Create one via the API / console.",
+    "noProjects": "No projects. Create one via the API.",
+    "noMilestones": "No milestones. Create one via the API.",
+    "noTasks": "No tasks in this milestone. Add the first one.",
+    "pickSolution": "Pick a solution to see its projects.",
+    "pickProject": "Pick a project to see its milestones.",
+    "pickMilestone": "Pick a milestone to see its tasks.",
+    "blockedCount": "{n} blocked",
+    "closed": "Closed",
+    "toggleClosed": "Show/hide closed tasks (out of scope)"
+  },
+  "scoreboard": {
+    "today": "Today",
+    "projectsTip": "Projects closed today",
+    "milestonesTip": "Milestones closed today",
+    "tasksTip": "Tasks closed today"
+  },
+  "win": {
+    "projectKicker": "Project",
+    "projectTitle": "DELIVERED!",
+    "solutionKicker": "Whole solution",
+    "solutionTitle": "COMPLETED!",
+    "subtitle": "Great work - keep it flowing!",
+    "button": "Nice"
+  },
+  "project": {
+    "milestones": "Milestones",
+    "tasks": "Tasks",
+    "showTasks": "show tasks",
+    "all": "All"
+  },
+  "task": {
+    "eyebrow": "Task",
+    "status": "Status",
+    "priority": "Priority",
+    "verified": "Verified",
+    "unverified": "Unverified",
+    "blockReason": "Block reason",
+    "description": "Description",
+    "labels": "Labels",
+    "subtasks": "Subtasks",
+    "blockedByHeading": "Blocked by",
+    "related": "Related",
+    "artifacts": "Artifacts",
+    "comments": "Comments",
+    "noComments": "No comments.",
+    "addCommentPlaceholder": "Add a comment...",
+    "send": "Send",
+    "anon": "anon",
+    "deleteTask": "Delete task",
+    "ariaDetail": "Task details"
+  },
+  "forms": {
+    "newSolution": "New solution",
+    "newProject": "New project",
+    "newMilestone": "New milestone",
+    "newTask": "New task",
+    "add": "Add",
+    "cancel": "Cancel",
+    "genericError": "Error",
+    "solutionNamePlaceholder": "Solution name (e.g. Acme Client)",
+    "projectNamePlaceholder": "Project name",
+    "milestoneTitlePlaceholder": "Milestone name (e.g. MVP)",
+    "taskTitlePlaceholder": "Task title"
+  },
+  "delete": {
+    "default": "Delete",
+    "solution": "Delete solution"
+  },
+  "settings": {
+    "eyebrow": "Settings",
+    "viewMode": "View mode (SSR)",
+    "layoutMobile": "Mobile",
+    "layoutDesktop": "Desktop",
+    "adminKey": "Admin key (FS_API_KEY)",
+    "adminSet": "set",
+    "adminOpen": "none (open mode)",
+    "dbPath": "Database (FS_DB_PATH)",
+    "language": "Language",
+    "languageHint": "Interface language. Changing it reloads the app.",
+    "server": {
+      "title": "Server",
+      "start": "Start",
+      "stop": "Stop",
+      "restart": "Restart",
+      "confirmStop": "Stop the server? The dashboard will stop responding.",
+      "cancel": "Cancel",
+      "localOnly": "Controls are available only locally on the Mac.",
+      "state": {
+        "running": "Running",
+        "stopped": "Stopped",
+        "starting": "Starting...",
+        "stopping": "Stopping...",
+        "unknown": "Unknown",
+        "loading": "Checking...",
+        "unreachable": "Unreachable"
+      }
+    }
+  },
+  "language": {
+    "self": "English",
+    "en": "English",
+    "pl": "Polski",
+    "switch": "Language"
+  },
+  "users": {
+    "createKeyError": "Could not create the key",
+    "revokeError": "Could not revoke the key",
+    "keyCreated": "Key created - copy it now, it will not be shown again:",
+    "hide": "Hide",
+    "solutionScope": "Solution (scope)",
+    "permissions": "Permissions",
+    "noActors": "No actors. Generate the first key above.",
+    "archivedActor": "archived",
+    "noKeys": "no keys",
+    "expired": "expired",
+    "expiresAt": "expires {when}",
+    "usedAt": "used {when}",
+    "neverUsed": "never used",
+    "revoked": "revoked",
+    "revoke": "Revoke",
+    "noEvents": "No events.",
+    "actors": "Actors",
+    "keys": "Keys",
+    "activity": "Activity",
+    "details": "Details",
+    "kindHuman": "human",
+    "kindAgent": "agent",
+    "keyCount": "{n} keys",
+    "subAgents": "{n} sub-API",
+    "toggleSubAgents": "Show or hide sub-API",
+    "addActor": "Add actor",
+    "addActorName": "Name",
+    "addActorNamePlaceholder": "e.g. voice-eval-worker",
+    "addActorKind": "Kind",
+    "create": "Create",
+    "cancel": "Cancel",
+    "addKey": "Add API key",
+    "scope": "Scope",
+    "createKey": "Create key",
+    "pickActor": "Select an actor to see its keys and activity.",
+    "pickKey": "Select a key to see its details and activity.",
+    "noKeysActor": "No keys yet.",
+    "noKeyActivity": "No events for this key yet.",
+    "keyPrefix": "Prefix",
+    "keyCreatedAt": "Created",
+    "keyExpiry": "Expiry",
+    "keyLastUsed": "Last used",
+    "keyRevoked": "Revoked",
+    "keyMinted": "Keys minted",
+    "noExpiry": "never",
+    "globalScope": "all (global)"
+  }
+}

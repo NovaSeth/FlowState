@@ -1,0 +1,43 @@
+{
+  "name": "flow-state",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "seed": "tsx scripts/seed.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "three": "^0.171.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.171.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "prettier": "^3.4.2",
+    "tailwindcss": "^4",
+    "tsx": "^4.22.3",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
+}

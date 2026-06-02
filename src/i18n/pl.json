@@ -1,0 +1,255 @@
+{
+  "app": {
+    "name": "Flow State",
+    "brandLead": "Flow",
+    "brandRest": " State",
+    "description": "Dashboard postepu projektow Claude Code"
+  },
+  "nav": {
+    "overview": "Przeglad",
+    "explorer": "Eksplorator",
+    "users": "Uzytkownicy",
+    "settings": "Ustawienia",
+    "menu": "Menu glowne"
+  },
+  "common": {
+    "back": "Wstecz",
+    "confirm": "Na pewno?",
+    "close": "Zamknij",
+    "loading": "Ładowanie",
+    "loadingEllipsis": "Ladowanie...",
+    "saveError": "Blad zapisu",
+    "archived": "Archiwum"
+  },
+  "time": {
+    "justNow": "przed chwilą",
+    "minsAgo": "{n} min temu",
+    "hoursAgo": "{n} h temu",
+    "daysAgo": "{n} dni temu",
+    "monthsAgo": "{n} mies. temu"
+  },
+  "meta": {
+    "blockedByCount": "Zablokowane przez {n} niezamknietych zadan",
+    "subtasksProgress": "Podzadania: {done} z {total} done"
+  },
+  "units": {
+    "projShort": "{n} proj.",
+    "milestoneShort": "{n} kam.",
+    "taskShort": "{n} zad."
+  },
+  "status": {
+    "todo": "Do zrobienia",
+    "in_progress": "W toku",
+    "blocked": "Zablokowane",
+    "done": "Zrobione",
+    "closed": "Zamkniete"
+  },
+  "priority": {
+    "none": "Brak",
+    "low": "Niski",
+    "medium": "Sredni",
+    "high": "Wysoki",
+    "urgent": "Pilny"
+  },
+  "projectStatus": {
+    "active": "Aktywny",
+    "paused": "Wstrzymany",
+    "done": "Zakonczony",
+    "archived": "Archiwum"
+  },
+  "solutionStatus": {
+    "active": "Aktywna",
+    "archived": "Archiwum"
+  },
+  "blockerType": {
+    "dependency": "zaleznosc",
+    "external": "zewnetrzny",
+    "decision": "decyzja"
+  },
+  "milestoneOutcome": {
+    "shipped": "Dostarczone",
+    "infeasible": "Niewykonalne",
+    "descoped": "Wycofane"
+  },
+  "solution": {
+    "projects": "Projekty"
+  },
+  "overview": {
+    "solutions": "Solucje",
+    "projects": "Projekty",
+    "milestones": "Kamienie",
+    "tasks": "Zadania",
+    "completed": "Ukonczone",
+    "needsAttention": "Wymaga uwagi",
+    "needsAttentionHint": "Zadania zablokowane lub pilne we wszystkich projektach.",
+    "nothingBlocking": "Nic nie blokuje. Czysto.",
+    "recentActivity": "Ostatnia aktywnosc",
+    "noActivity": "Brak aktywnosci.",
+    "noProjectsInSolution": "Brak projektow w tej solucji.",
+    "recent": "Ostatnio",
+    "dailyChartTitle": "Ukonczone dziennie",
+    "dailyChartEmpty": "Brak ukonczonych zadan. Domknij zadanie, aby zobaczyc je tutaj.",
+    "dailyChartUnit": "{n} zad."
+  },
+  "explorer": {
+    "solutions": "Solucje",
+    "projects": "Projekty",
+    "milestones": "Kamienie milowe",
+    "tasks": "Zadania",
+    "list": "Lista",
+    "kanban": "Kanban",
+    "emptyKanbanColumn": "Brak",
+    "noSolutions": "Brak solucji. Utworz przez API / konsole.",
+    "noProjects": "Brak projektow. Utworz przez API.",
+    "noMilestones": "Brak kamieni. Utworz przez API.",
+    "noTasks": "Brak zadan w tym kamieniu. Dodaj pierwsze.",
+    "pickSolution": "Wybierz solucje, aby zobaczyc projekty.",
+    "pickProject": "Wybierz projekt, aby zobaczyc kamienie milowe.",
+    "pickMilestone": "Wybierz kamien milowy, aby zobaczyc zadania.",
+    "blockedCount": "{n} zablokowanych",
+    "closed": "Zamkniete",
+    "toggleClosed": "Pokaz/ukryj zamkniete zadania (poza zakresem)"
+  },
+  "scoreboard": {
+    "today": "Dzis",
+    "projectsTip": "Projekty zamkniete dzis",
+    "milestonesTip": "Kamienie zamkniete dzis",
+    "tasksTip": "Zadania zamkniete dzis"
+  },
+  "win": {
+    "projectKicker": "Projekt",
+    "projectTitle": "DOSTARCZONY!",
+    "solutionKicker": "Cala solucja",
+    "solutionTitle": "UKONCZONA!",
+    "subtitle": "Swietna robota - leci dalej!",
+    "button": "Super"
+  },
+  "project": {
+    "milestones": "Kamienie milowe",
+    "tasks": "Zadania",
+    "showTasks": "pokaz zadania",
+    "all": "Wszystkie"
+  },
+  "task": {
+    "eyebrow": "Zadanie",
+    "status": "Status",
+    "priority": "Priorytet",
+    "verified": "Zweryfikowane",
+    "unverified": "Niezweryfikowane",
+    "blockReason": "Powod blokady",
+    "description": "Opis",
+    "labels": "Etykiety",
+    "subtasks": "Podzadania",
+    "blockedByHeading": "Blokowane przez",
+    "related": "Powiazane",
+    "artifacts": "Artefakty",
+    "comments": "Komentarze",
+    "noComments": "Brak komentarzy.",
+    "addCommentPlaceholder": "Dodaj komentarz...",
+    "send": "Wyslij",
+    "anon": "anon",
+    "deleteTask": "Usun zadanie",
+    "ariaDetail": "Szczegoly zadania"
+  },
+  "forms": {
+    "newSolution": "Nowa solucja",
+    "newProject": "Nowy projekt",
+    "newMilestone": "Nowy kamien",
+    "newTask": "Nowe zadanie",
+    "add": "Dodaj",
+    "cancel": "Anuluj",
+    "genericError": "Blad",
+    "solutionNamePlaceholder": "Nazwa solucji (np. Klient Acme)",
+    "projectNamePlaceholder": "Nazwa projektu",
+    "milestoneTitlePlaceholder": "Nazwa kamienia milowego (np. MVP)",
+    "taskTitlePlaceholder": "Tytul zadania"
+  },
+  "delete": {
+    "default": "Usun",
+    "solution": "Usun solucje"
+  },
+  "settings": {
+    "eyebrow": "Ustawienia",
+    "viewMode": "Tryb widoku (SSR)",
+    "layoutMobile": "Telefon",
+    "layoutDesktop": "Komputer",
+    "adminKey": "Klucz admin (FS_API_KEY)",
+    "adminSet": "ustawiony",
+    "adminOpen": "brak (tryb otwarty)",
+    "dbPath": "Baza (FS_DB_PATH)",
+    "language": "Jezyk",
+    "languageHint": "Jezyk interfejsu. Zmiana przeladowuje aplikacje.",
+    "server": {
+      "title": "Serwer",
+      "start": "Uruchom",
+      "stop": "Zatrzymaj",
+      "restart": "Restart",
+      "confirmStop": "Zatrzymac serwer? Dashboard przestanie odpowiadac.",
+      "cancel": "Anuluj",
+      "localOnly": "Sterowanie dostepne tylko lokalnie na Macu.",
+      "state": {
+        "running": "Dziala",
+        "stopped": "Zatrzymany",
+        "starting": "Uruchamianie...",
+        "stopping": "Zatrzymywanie...",
+        "unknown": "Nieznany",
+        "loading": "Sprawdzanie...",
+        "unreachable": "Niedostepny"
+      }
+    }
+  },
+  "language": {
+    "self": "Polski",
+    "en": "English",
+    "pl": "Polski",
+    "switch": "Jezyk"
+  },
+  "users": {
+    "createKeyError": "Nie udalo sie utworzyc klucza",
+    "revokeError": "Nie udalo sie odwolac klucza",
+    "keyCreated": "Klucz utworzony - skopiuj teraz, nie pokaze sie ponownie:",
+    "hide": "Ukryj",
+    "solutionScope": "Solucja (zakres)",
+    "permissions": "Uprawnienia",
+    "noActors": "Brak aktorow. Wygeneruj pierwszy klucz powyzej.",
+    "archivedActor": "zarchiwizowany",
+    "noKeys": "brak kluczy",
+    "expired": "wygasl",
+    "expiresAt": "wygasa {when}",
+    "usedAt": "uzyty {when}",
+    "neverUsed": "nieuzywany",
+    "revoked": "odwolany",
+    "revoke": "Odwolaj",
+    "noEvents": "Brak zdarzen.",
+    "actors": "Aktorzy",
+    "keys": "Klucze",
+    "activity": "Aktywnosc",
+    "details": "Szczegoly",
+    "kindHuman": "czlowiek",
+    "kindAgent": "agent",
+    "keyCount": "{n} kluczy",
+    "subAgents": "{n} sub-API",
+    "toggleSubAgents": "Pokaz lub ukryj sub-API",
+    "addActor": "Dodaj aktora",
+    "addActorName": "Nazwa",
+    "addActorNamePlaceholder": "np. voice-eval-worker",
+    "addActorKind": "Rodzaj",
+    "create": "Utworz",
+    "cancel": "Anuluj",
+    "addKey": "Dodaj klucz API",
+    "scope": "Zakres",
+    "createKey": "Utworz klucz",
+    "pickActor": "Wybierz aktora, aby zobaczyc jego klucze i aktywnosc.",
+    "pickKey": "Wybierz klucz, aby zobaczyc jego szczegoly i aktywnosc.",
+    "noKeysActor": "Brak kluczy.",
+    "noKeyActivity": "Brak zdarzen dla tego klucza.",
+    "keyPrefix": "Prefiks",
+    "keyCreatedAt": "Utworzony",
+    "keyExpiry": "Wygasa",
+    "keyLastUsed": "Ostatnio uzyty",
+    "keyRevoked": "Odwolany",
+    "keyMinted": "Zmintowane klucze",
+    "noExpiry": "bezterminowo",
+    "globalScope": "wszystkie (globalny)"
+  }
+}

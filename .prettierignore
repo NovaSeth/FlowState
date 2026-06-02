@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+build
+data
+coverage
+package-lock.json
+*.tsbuildinfo
+src/i18n/*.json
