@@ -29,6 +29,7 @@ import {
   TaskMeta,
 } from "./ui";
 import { DeleteButton } from "./DeleteButton";
+import { NewSolutionForm } from "./forms";
 import { TaskPanel } from "./TaskPanel";
 import { Pulse } from "./Pulse";
 import { AnimatedNumber } from "./AnimatedNumber";
@@ -236,7 +237,9 @@ export function Explorer({
 
   // --- content of each level (shared between the desktop board and the mobile drill) ---
 
-  const solutionsCol =
+  // List of solutions; the create form is pinned below it (see solutionsCol),
+  // mirroring the "add actor" CTA at the bottom of the actors column.
+  const solutionsList =
     solutions.length === 0 ? (
       <ColHint text={t("explorer.noSolutions")} />
     ) : (
@@ -244,45 +247,58 @@ export function Explorer({
         solutions,
         (s) => s.status === "archived",
         (s) => (
-        <DrillRow
-          key={s.id}
-          narrow={narrow}
-          dimmed={s.status === "archived"}
-          active={s.id === solId}
-          cid={s.id}
-          onSelect={() => selectSolution(s.id)}
-          title={s.name}
-          counts={s.statusCounts}
-          percent={s.progress.percent}
-          sub={
-            <span className="flex items-center gap-1.5">
-              {t("units.projShort", { n: s.projectCount })}
-              {s.status === "archived" && <MetaPill meta={SOLUTION_STATUS_META.archived} />}
-            </span>
-          }
-          onDelete={() => api.deleteSolution(s.id)}
-          onDeleted={() => {
-            if (solId === s.id) {
-              setSolId(null);
-              setProjId(null);
-              setMsId(null);
-              setProjects([]);
+          <DrillRow
+            key={s.id}
+            narrow={narrow}
+            dimmed={s.status === "archived"}
+            active={s.id === solId}
+            cid={s.id}
+            onSelect={() => selectSolution(s.id)}
+            title={s.name}
+            counts={s.statusCounts}
+            percent={s.progress.percent}
+            sub={
+              <span className="flex items-center gap-1.5">
+                {t("units.projShort", { n: s.projectCount })}
+                {s.status === "archived" && (
+                  <MetaPill meta={SOLUTION_STATUS_META.archived} />
+                )}
+              </span>
             }
-            loadSolutions();
-          }}
-        />
-      ))
+            onDelete={() => api.deleteSolution(s.id)}
+            onDeleted={() => {
+              if (solId === s.id) {
+                setSolId(null);
+                setProjId(null);
+                setMsId(null);
+                setProjects([]);
+              }
+              loadSolutions();
+            }}
+          />
+        ),
+      )
     );
+
+  const solutionsCol = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">{solutionsList}</div>
+      <div className="shrink-0 border-t border-edge bg-canvas p-2">
+        {/* onDone keeps the live column in sync without a full router refresh. */}
+        <NewSolutionForm onDone={loadSolutions} />
+      </div>
+    </div>
+  );
 
   const projectsCol = loadingProjects ? (
     <ColLoading />
   ) : projects.length === 0 ? (
     <ColHint text={t("explorer.noProjects")} />
   ) : (
-      withArchivedDivider(
-        projects,
-        (p) => p.status === "archived",
-        (p) => (
+    withArchivedDivider(
+      projects,
+      (p) => p.status === "archived",
+      (p) => (
         <DrillRow
           key={p.id}
           narrow={narrow}
@@ -312,18 +328,19 @@ export function Explorer({
             if (solId) loadProjects(solId);
           }}
         />
-      ))
-    );
+      ),
+    )
+  );
 
   const milestonesCol = loadingMilestones ? (
     <ColLoading />
   ) : milestones.length === 0 ? (
     <ColHint text={t("explorer.noMilestones")} />
   ) : (
-      withArchivedDivider(
-        milestones,
-        (m) => m.status === "archived",
-        (m) => (
+    withArchivedDivider(
+      milestones,
+      (m) => m.status === "archived",
+      (m) => (
         <DrillRow
           key={m.id}
           narrow={narrow}
@@ -339,7 +356,9 @@ export function Explorer({
               <span className="font-mono tabular-nums">
                 {t("units.taskShort", { n: m.progress.total })}
               </span>
-              {m.statusCounts.blocked > 0 && <BlockedBadge n={m.statusCounts.blocked} />}
+              {m.statusCounts.blocked > 0 && (
+                <BlockedBadge n={m.statusCounts.blocked} />
+              )}
               <MetaPill meta={MILESTONE_STATUS_META[m.status]} />
             </span>
           }
@@ -352,8 +371,9 @@ export function Explorer({
             if (projId) loadMilestones(projId);
           }}
         />
-      ))
-    );
+      ),
+    )
+  );
 
   const tasksPaneInner = (
     <>
@@ -435,7 +455,12 @@ export function Explorer({
       t("explorer.milestones"),
       t("explorer.tasks"),
     ];
-    const subs = [undefined, selectedSolName, selectedProjName, selectedMsTitle];
+    const subs = [
+      undefined,
+      selectedSolName,
+      selectedProjName,
+      selectedMsTitle,
+    ];
     const counts = [
       solutions.length,
       projects.length,
@@ -447,13 +472,14 @@ export function Explorer({
         <div className="flex min-h-0 flex-1 flex-col bg-canvas">
           {tasksPaneInner}
         </div>
+      ) : level === 0 ? (
+        // solutionsCol manages its own scroll and pins the create form at the bottom.
+        <div className="flex min-h-0 flex-1 flex-col bg-canvas">
+          {solutionsCol}
+        </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto bg-canvas pb-2">
-          {level === 0
-            ? solutionsCol
-            : level === 1
-              ? projectsCol
-              : milestonesCol}
+          {level === 1 ? projectsCol : milestonesCol}
         </div>
       );
 
@@ -478,7 +504,7 @@ export function Explorer({
   return (
     <>
       <div className="flex h-full min-h-0 overflow-x-auto">
-        <Column title={t("explorer.solutions")} count={solutions.length} scroll>
+        <Column title={t("explorer.solutions")} count={solutions.length}>
           {solutionsCol}
         </Column>
 
@@ -489,7 +515,11 @@ export function Explorer({
         )}
 
         {projId && (
-          <Column title={t("explorer.milestones")} count={milestones.length} scroll>
+          <Column
+            title={t("explorer.milestones")}
+            count={milestones.length}
+            scroll
+          >
             {milestonesCol}
           </Column>
         )}
@@ -621,7 +651,10 @@ function KanbanBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colSig]);
   return (
-    <div ref={boardRef} className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
+    <div
+      ref={boardRef}
+      className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3"
+    >
       {columns.map(({ status, col }) => {
         const meta = STATUS_META[status];
         return (
@@ -631,13 +664,17 @@ function KanbanBoard({
           >
             <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-2.5">
               <Dot className={meta.dot} />
-              <span className="text-xs font-semibold text-fg">{t(meta.labelKey)}</span>
+              <span className="text-xs font-semibold text-fg">
+                {t(meta.labelKey)}
+              </span>
               <CountPill className="ml-auto">{col.length}</CountPill>
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
               {col.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center py-6">
-                  <span className="text-[11px] text-fg-subtle">{t("explorer.emptyKanbanColumn")}</span>
+                  <span className="text-[11px] text-fg-subtle">
+                    {t("explorer.emptyKanbanColumn")}
+                  </span>
                 </div>
               ) : (
                 col.map((t) => (
@@ -718,57 +755,57 @@ function DrillRow({
 }) {
   return (
     <Pulse signal={percent} variant="percent">
-    <div
-      data-cid={cid}
-      className={`group relative ${dimmed ? "opacity-50 transition-opacity hover:opacity-100" : ""}`}
-    >
-      <button
-        onClick={onSelect}
-        className={`flex w-full flex-col gap-1.5 px-3 text-left transition-colors ${
-          narrow ? "py-3.5 active:bg-canvas-subtle" : "py-2.5"
-        } ${
-          active ? "bg-accent-muted" : narrow ? "" : "hover:bg-canvas-subtle"
-        }`}
+      <div
+        data-cid={cid}
+        className={`group relative ${dimmed ? "opacity-50 transition-opacity hover:opacity-100" : ""}`}
       >
-        <div className={`flex items-center gap-2 ${narrow ? "" : "pr-5"}`}>
-          <span
-            className={`min-w-0 flex-1 truncate text-fg ${narrow ? "text-[15px]" : "text-sm"}`}
-          >
-            {title}
-          </span>
-          {narrow && (
-            <Icon
-              name="chevron"
-              size={18}
-              className="-mr-1 shrink-0 text-fg-subtle"
+        <button
+          onClick={onSelect}
+          className={`flex w-full flex-col gap-1.5 px-3 text-left transition-colors ${
+            narrow ? "py-3.5 active:bg-canvas-subtle" : "py-2.5"
+          } ${
+            active ? "bg-accent-muted" : narrow ? "" : "hover:bg-canvas-subtle"
+          }`}
+        >
+          <div className={`flex items-center gap-2 ${narrow ? "" : "pr-5"}`}>
+            <span
+              className={`min-w-0 flex-1 truncate text-fg ${narrow ? "text-[15px]" : "text-sm"}`}
+            >
+              {title}
+            </span>
+            {narrow && (
+              <Icon
+                name="chevron"
+                size={18}
+                className="-mr-1 shrink-0 text-fg-subtle"
+              />
+            )}
+          </div>
+          <StatusBar counts={counts} />
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-[11px] text-fg-subtle">
+              {sub}
+            </span>
+            <AnimatedNumber
+              value={percent}
+              suffix="%"
+              className="shrink-0 font-mono text-[11px] tabular-nums text-fg-muted"
             />
-          )}
-        </div>
-        <StatusBar counts={counts} />
-        <div className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[11px] text-fg-subtle">
-            {sub}
-          </span>
-          <AnimatedNumber
-            value={percent}
-            suffix="%"
-            className="shrink-0 font-mono text-[11px] tabular-nums text-fg-muted"
-          />
-        </div>
-      </button>
-      {/* Deletion: desktop only (reveal on hover). Touch has no hover, and
+          </div>
+        </button>
+        {/* Deletion: desktop only (reveal on hover). Touch has no hover, and
           deleting from the list is destructive and rare - it stays on desktop. */}
-      {!narrow && (
-        <span className="absolute right-1 top-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <DeleteButton
-            label=""
-            className="bg-canvas"
-            onDelete={onDelete}
-            onDone={onDeleted}
-          />
-        </span>
-      )}
-    </div>
+        {!narrow && (
+          <span className="absolute right-1 top-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <DeleteButton
+              label=""
+              className="bg-canvas"
+              onDelete={onDelete}
+              onDone={onDeleted}
+            />
+          </span>
+        )}
+      </div>
     </Pulse>
   );
 }

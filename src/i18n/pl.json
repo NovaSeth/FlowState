@@ -99,7 +99,7 @@
     "list": "Lista",
     "kanban": "Kanban",
     "emptyKanbanColumn": "Brak",
-    "noSolutions": "Brak solucji. Utworz przez API / konsole.",
+    "noSolutions": "Brak solucji. Utworz pierwsza ponizej.",
     "noProjects": "Brak projektow. Utworz przez API.",
     "noMilestones": "Brak kamieni. Utworz przez API.",
     "noTasks": "Brak zadan w tym kamieniu. Dodaj pierwsze.",

@@ -61,7 +61,8 @@ function rateLimited(key: string): boolean {
     rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     // Opportunistic cleanup so the map does not grow unbounded across many clients.
     if (rateBuckets.size > 4096) {
-      for (const [k, v] of rateBuckets) if (now >= v.resetAt) rateBuckets.delete(k);
+      for (const [k, v] of rateBuckets)
+        if (now >= v.resetAt) rateBuckets.delete(k);
     }
     return false;
   }
@@ -115,9 +116,28 @@ export async function readJson(req: Request): Promise<unknown> {
 }
 
 /**
+ * A keyless request is trusted only when it comes from the local dashboard or the
+ * menu-bar app. Everything else (the MCP server, a CLI, an external/embedded page)
+ * must present an API key - without one it sees nothing.
+ * - The menu-bar app marks its read-only polling with `x-fs-monitor: 1`.
+ * - A same-origin browser sends `Sec-Fetch-Site: same-origin|same-site|none`; a
+ *   node fetch / curl / the MCP server omit the header entirely, and a foreign page
+ *   embedding us sends `cross-site`. Both are treated as untrusted.
+ * This is a header heuristic, sufficient for a single-user local trust model (the
+ * header cannot be forged by a non-browser client, but is not a security boundary
+ * against a determined local attacker - that is what API keys are for).
+ */
+function isTrustedKeylessClient(req: Request): boolean {
+  if (req.headers.get("x-fs-monitor") === "1") return true;
+  const site = req.headers.get("sec-fetch-site");
+  return site !== null && site !== "cross-site";
+}
+
+/**
  * Resolves identity from the x-api-key header:
- * - no token: anonymous (allowed in attribution mode); on a mutation in strict
- *   mode or when FS_API_KEY (admin) is set -> 401,
+ * - no token: allowed ONLY for the local dashboard / menu-bar app (see
+ *   isTrustedKeylessClient); any other keyless client -> 401. On a mutation in
+ *   strict mode or when FS_API_KEY (admin) is set -> 401 even for the dashboard,
  * - token == FS_API_KEY: admin/bootstrap (no specific actor),
  * - token = actor key: returns actorId/keyId (resolveApiKey throws 401 when
  *   revoked/expired, returns null on a bad secret -> 401 here).
@@ -132,6 +152,11 @@ function resolveContext(req: Request): RequestContext {
   const mutating = MUTATING.has(req.method);
 
   if (!token) {
+    // No key: only the local dashboard (same-origin browser) and the menu-bar app
+    // may proceed keyless. Every other client must authenticate.
+    if (!isTrustedKeylessClient(req)) {
+      throw new AppError(401, "Missing x-api-key header");
+    }
     if (mutating && (hasAdmin || strict)) {
       throw new AppError(401, "Missing x-api-key header");
     }
@@ -171,7 +196,10 @@ export function handleError(e: unknown): Response {
 
 type RouteContext = { params: Promise<Record<string, string>> };
 
-type Handler = (req: Request, ctx: RouteContext) => Response | Promise<Response>;
+type Handler = (
+  req: Request,
+  ctx: RouteContext,
+) => Response | Promise<Response>;
 
 /**
  * Wraps a route handler so thrown AppError/SyntaxError/unknown errors become

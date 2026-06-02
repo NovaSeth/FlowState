@@ -31,25 +31,41 @@ let activityMod: Mod;
 let me: Mod;
 
 const ctx = (id: string): Ctx => ({ params: Promise.resolve({ id }) });
+
+// Most tests exercise the API the way the local dashboard does: a same-origin
+// browser, keyless. R() injects that Sec-Fetch-Site signal so keyless reads and
+// mutations are accepted (a bare node Request, like an unkeyed MCP client, is now
+// rejected - see http.ts). The auth/scope sub-suite sends an x-api-key instead,
+// and the one explicit untrusted-anonymous case asserts the 401.
+const SAME_ORIGIN = { "sec-fetch-site": "same-origin" };
+function R(url: string, init: RequestInit = {}): Request {
+  return new Request(url, {
+    ...init,
+    headers: { ...SAME_ORIGIN, ...(init.headers as Record<string, string>) },
+  });
+}
+
 const post = (url: string, body: unknown) =>
-  new Request(url, { method: "POST", body: JSON.stringify(body) });
+  R(url, { method: "POST", body: JSON.stringify(body) });
 const patch = (url: string, body: unknown) =>
-  new Request(url, { method: "PATCH", body: JSON.stringify(body) });
+  R(url, { method: "PATCH", body: JSON.stringify(body) });
 
 beforeAll(async () => {
   solutions = (await import("@/app/api/solutions/route")) as unknown as Mod;
-  clientById = (await import("@/app/api/solutions/[id]/route")) as unknown as Mod;
+  clientById =
+    (await import("@/app/api/solutions/[id]/route")) as unknown as Mod;
   projects = (await import("@/app/api/projects/route")) as unknown as Mod;
   milestones = (await import("@/app/api/milestones/route")) as unknown as Mod;
-  milestonesById = (await import("@/app/api/milestones/[id]/route")) as unknown as Mod;
+  milestonesById =
+    (await import("@/app/api/milestones/[id]/route")) as unknown as Mod;
   tasks = (await import("@/app/api/tasks/route")) as unknown as Mod;
   taskById = (await import("@/app/api/tasks/[id]/route")) as unknown as Mod;
-  taskComments = (await import(
-    "@/app/api/tasks/[id]/comments/route"
-  )) as unknown as Mod;
+  taskComments =
+    (await import("@/app/api/tasks/[id]/comments/route")) as unknown as Mod;
   dashboard = (await import("@/app/api/dashboard/route")) as unknown as Mod;
   changes = (await import("@/app/api/changes/route")) as unknown as Mod;
-  tasksSearch = (await import("@/app/api/tasks/search/route")) as unknown as Mod;
+  tasksSearch =
+    (await import("@/app/api/tasks/search/route")) as unknown as Mod;
   actors = (await import("@/app/api/actors/route")) as unknown as Mod;
   keys = (await import("@/app/api/keys/route")) as unknown as Mod;
   keyById = (await import("@/app/api/keys/[id]/route")) as unknown as Mod;
@@ -67,13 +83,15 @@ describe("API routes", () => {
   let taskId = "";
 
   it("POST /api/solutions -> 201, GET -> 200 includes it", async () => {
-    const res = await solutions.POST(post("http://t/api/solutions", { name: "Acme" }));
+    const res = await solutions.POST(
+      post("http://t/api/solutions", { name: "Acme" }),
+    );
     expect(res.status).toBe(201);
     const solution = await res.json();
     expect(solution.name).toBe("Acme");
     solutionId = solution.id;
 
-    const listRes = await solutions.GET(new Request("http://t/api/solutions"));
+    const listRes = await solutions.GET(R("http://t/api/solutions"));
     expect(listRes.status).toBe(200);
     const list = await listRes.json();
     expect(Array.isArray(list)).toBe(true);
@@ -91,7 +109,7 @@ describe("API routes", () => {
 
     // The project starts empty - no milestone is created automatically.
     const msRes = await milestones.GET(
-      new Request(`http://t/api/milestones?projectId=${projectId}`),
+      R(`http://t/api/milestones?projectId=${projectId}`),
     );
     expect(msRes.status).toBe(200);
     const ms = await msRes.json();
@@ -112,7 +130,7 @@ describe("API routes", () => {
   });
 
   it("GET /api/milestones without projectId -> 400", async () => {
-    const res = await milestones.GET(new Request("http://t/api/milestones"));
+    const res = await milestones.GET(R("http://t/api/milestones"));
     expect(res.status).toBe(400);
   });
 
@@ -159,7 +177,7 @@ describe("API routes", () => {
     expect(addRes.status).toBe(201);
 
     const res = await taskById.GET(
-      new Request(`http://t/api/tasks/${taskId}?expand=comments`),
+      R(`http://t/api/tasks/${taskId}?expand=comments`),
       ctx(taskId),
     );
     expect(res.status).toBe(200);
@@ -171,7 +189,7 @@ describe("API routes", () => {
 
   it("GET /api/solutions/[id] missing -> 404", async () => {
     const res = await clientById.GET(
-      new Request("http://t/api/solutions/cl_does_not_exist"),
+      R("http://t/api/solutions/cl_does_not_exist"),
       ctx("cl_does_not_exist"),
     );
     expect(res.status).toBe(404);
@@ -179,7 +197,7 @@ describe("API routes", () => {
 
   it("GET /api/tasks/[id] missing -> 404", async () => {
     const res = await taskById.GET(
-      new Request("http://t/api/tasks/ta_nope"),
+      R("http://t/api/tasks/ta_nope"),
       ctx("ta_nope"),
     );
     expect(res.status).toBe(404);
@@ -200,13 +218,13 @@ describe("API routes", () => {
 
   it("POST /api/solutions with invalid JSON -> 400", async () => {
     const res = await solutions.POST(
-      new Request("http://t/api/solutions", { method: "POST", body: "{not json" }),
+      R("http://t/api/solutions", { method: "POST", body: "{not json" }),
     );
     expect(res.status).toBe(400);
   });
 
   it("GET /api/dashboard -> 200 with totals", async () => {
-    const res = await dashboard.GET(new Request("http://t/api/dashboard"));
+    const res = await dashboard.GET(R("http://t/api/dashboard"));
     expect(res.status).toBe(200);
     const payload = await res.json();
     expect(payload.totals.solutions).toBeGreaterThanOrEqual(1);
@@ -216,7 +234,7 @@ describe("API routes", () => {
   });
 
   it("GET /api/changes returns serverTime + full snapshot when since is empty", async () => {
-    const res = await changes.GET(new Request("http://t/api/changes"));
+    const res = await changes.GET(R("http://t/api/changes"));
     expect(res.status).toBe(200);
     const p = await res.json();
     expect(typeof p.serverTime).toBe("string");
@@ -229,7 +247,7 @@ describe("API routes", () => {
 
   it("GET /api/changes?since=futureFar returns empty buckets", async () => {
     const res = await changes.GET(
-      new Request("http://t/api/changes?since=9999-12-31T23:59:59.999Z"),
+      R("http://t/api/changes?since=9999-12-31T23:59:59.999Z"),
     );
     expect(res.status).toBe(200);
     const p = await res.json();
@@ -242,7 +260,7 @@ describe("API routes", () => {
 
   it("GET /api/tasks?solutionId= returns tasks of the whole solution", async () => {
     const res = await tasks.GET(
-      new Request(`http://t/api/tasks?solutionId=${solutionId}`),
+      R(`http://t/api/tasks?solutionId=${solutionId}`),
     );
     expect(res.status).toBe(200);
     const list = await res.json();
@@ -251,9 +269,7 @@ describe("API routes", () => {
   });
 
   it("GET /api/tasks/search?q= finds by title, with context", async () => {
-    const res = await tasksSearch.GET(
-      new Request("http://t/api/tasks/search?q=solo"),
-    );
+    const res = await tasksSearch.GET(R("http://t/api/tasks/search?q=solo"));
     expect(res.status).toBe(200);
     const hits = await res.json();
     expect(hits.some((h: { title: string }) => h.title === "Solo")).toBe(true);
@@ -261,13 +277,15 @@ describe("API routes", () => {
   });
 
   it("GET /api/tasks/search without q -> 422", async () => {
-    const res = await tasksSearch.GET(new Request("http://t/api/tasks/search?q="));
+    const res = await tasksSearch.GET(R("http://t/api/tasks/search?q="));
     expect(res.status).toBe(422);
   });
 
   it("PATCH status=blocked without a reason -> 422; with a reason -> 200 + comment", async () => {
     const created = await (
-      await tasks.POST(post("http://t/api/tasks", { milestoneId, title: "To be blocked" }))
+      await tasks.POST(
+        post("http://t/api/tasks", { milestoneId, title: "To be blocked" }),
+      )
     ).json();
     const id = created.id;
 
@@ -278,29 +296,42 @@ describe("API routes", () => {
     expect(bad.status).toBe(422);
 
     const ok = await taskById.PATCH(
-      patch(`http://t/api/tasks/${id}`, { status: "blocked", reason: "waiting for a decision" }),
+      patch(`http://t/api/tasks/${id}`, {
+        status: "blocked",
+        reason: "waiting for a decision",
+      }),
       ctx(id),
     );
     expect(ok.status).toBe(200);
     expect((await ok.json()).status).toBe("blocked");
 
     const withComments = await taskById.GET(
-      new Request(`http://t/api/tasks/${id}?expand=comments`),
+      R(`http://t/api/tasks/${id}?expand=comments`),
       ctx(id),
     );
     const task = await withComments.json();
-    expect(task.comments.some((c: { body: string }) => c.body === "waiting for a decision")).toBe(true);
+    expect(
+      task.comments.some(
+        (c: { body: string }) => c.body === "waiting for a decision",
+      ),
+    ).toBe(true);
   });
 
   it("special characters in description pass through raw (no HTML escaping)", async () => {
-    const raw = 'a < b & c > d transformers<5';
+    const raw = "a < b & c > d transformers<5";
     const created = await (
-      await tasks.POST(post("http://t/api/tasks", { milestoneId, title: "Escape", description: raw }))
+      await tasks.POST(
+        post("http://t/api/tasks", {
+          milestoneId,
+          title: "Escape",
+          description: raw,
+        }),
+      )
     ).json();
     expect(created.description).toBe(raw);
 
     const fetched = await (
-      await taskById.GET(new Request(`http://t/api/tasks/${created.id}`), ctx(created.id))
+      await taskById.GET(R(`http://t/api/tasks/${created.id}`), ctx(created.id))
     ).json();
     expect(fetched.description).toBe(raw);
   });
@@ -308,19 +339,23 @@ describe("API routes", () => {
   // --- Stream C: identity, keys, audit ---
 
   it("POST /api/actors -> 201 (human)", async () => {
-    const res = await actors.POST(post("http://t/api/actors", { kind: "human", name: "Operator" }));
+    const res = await actors.POST(
+      post("http://t/api/actors", { kind: "human", name: "Operator" }),
+    );
     expect(res.status).toBe(201);
     expect((await res.json()).kind).toBe("human");
   });
 
   it("POST /api/keys -> token once; GET /api/keys does not expose the secret", async () => {
-    const res = await keys.POST(post("http://t/api/keys", { actorName: "ci-agent", scope: "write" }));
+    const res = await keys.POST(
+      post("http://t/api/keys", { actorName: "ci-agent", scope: "write" }),
+    );
     expect(res.status).toBe(201);
     const created = await res.json();
     expect(typeof created.token).toBe("string");
     expect(created.token).toContain(".");
 
-    const listRes = await keys.GET(new Request("http://t/api/keys"));
+    const listRes = await keys.GET(R("http://t/api/keys"));
     const list = await listRes.json();
     expect(list.length).toBeGreaterThanOrEqual(1);
     expect(list[0].secretHash).toBeUndefined();
@@ -332,7 +367,7 @@ describe("API routes", () => {
       await keys.POST(post("http://t/api/keys", { actorName: "tmp" }))
     ).json();
     const res = await keyById.DELETE(
-      new Request(`http://t/api/keys/${created.id}`, { method: "DELETE" }),
+      R(`http://t/api/keys/${created.id}`, { method: "DELETE" }),
       ctx(created.id),
     );
     expect(res.status).toBe(200);
@@ -340,7 +375,7 @@ describe("API routes", () => {
   });
 
   it("GET /api/me without a key -> actor null", async () => {
-    const res = await me.GET(new Request("http://t/api/me"));
+    const res = await me.GET(R("http://t/api/me"));
     expect((await res.json()).actor).toBeNull();
   });
 
@@ -351,7 +386,7 @@ describe("API routes", () => {
     const auth = { "content-type": "application/json", "x-api-key": key.token };
 
     const tRes = await tasks.POST(
-      new Request("http://t/api/tasks", {
+      R("http://t/api/tasks", {
         method: "POST",
         headers: auth,
         body: JSON.stringify({ milestoneId, title: "Owned by agent" }),
@@ -361,24 +396,30 @@ describe("API routes", () => {
     expect(task.ownerActorId).toBe(key.actorId);
 
     const meRes = await me.GET(
-      new Request("http://t/api/me", { headers: { "x-api-key": key.token } }),
+      R("http://t/api/me", { headers: { "x-api-key": key.token } }),
     );
     expect((await meRes.json()).actor.id).toBe(key.actorId);
 
     const actRes = await activityMod.GET(
-      new Request(`http://t/api/activity?entityId=${task.id}`),
+      R(`http://t/api/activity?entityId=${task.id}`),
     );
     const acts = await actRes.json();
     expect(
-      acts.some((a: { action: string; actorId: string }) => a.action === "create" && a.actorId === key.actorId),
+      acts.some(
+        (a: { action: string; actorId: string }) =>
+          a.action === "create" && a.actorId === key.actorId,
+      ),
     ).toBe(true);
   });
 
   it("bad x-api-key -> 401", async () => {
     const res = await tasks.POST(
-      new Request("http://t/api/tasks", {
+      R("http://t/api/tasks", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": "fsk_dead.beef" },
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": "fsk_dead.beef",
+        },
         body: JSON.stringify({ milestoneId, title: "X" }),
       }),
     );
@@ -387,12 +428,17 @@ describe("API routes", () => {
 
   it("a read key cannot mutate (403)", async () => {
     const readKey = await (
-      await keys.POST(post("http://t/api/keys", { actorName: "ro", scope: "read" }))
+      await keys.POST(
+        post("http://t/api/keys", { actorName: "ro", scope: "read" }),
+      )
     ).json();
     const res = await tasks.POST(
-      new Request("http://t/api/tasks", {
+      R("http://t/api/tasks", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": readKey.token },
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": readKey.token,
+        },
         body: JSON.stringify({ milestoneId, title: "x" }),
       }),
     );
@@ -401,13 +447,18 @@ describe("API routes", () => {
 
   it("delegation does not widen the solution scope (403)", async () => {
     const scoped = await (
-      await keys.POST(post("http://t/api/keys", { actorName: "scoped", solutionId }))
+      await keys.POST(
+        post("http://t/api/keys", { actorName: "scoped", solutionId }),
+      )
     ).json();
     // a solution-scoped key mints a global child -> 403
     const res = await keys.POST(
-      new Request("http://t/api/keys", {
+      R("http://t/api/keys", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": scoped.token },
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": scoped.token,
+        },
         body: JSON.stringify({ actorName: "child" }),
       }),
     );
@@ -419,7 +470,7 @@ describe("API routes", () => {
       await keys.POST(post("http://t/api/keys", { actorName: "selfrev" }))
     ).json();
     const res = await keyById.DELETE(
-      new Request(`http://t/api/keys/${self.id}`, {
+      R(`http://t/api/keys/${self.id}`, {
         method: "DELETE",
         headers: { "x-api-key": self.token },
       }),
@@ -444,14 +495,16 @@ describe("API routes", () => {
     expect(res.status).toBe(422);
     // None of the elements should be created.
     const listRes = await tasks.GET(
-      new Request(`http://t/api/tasks?milestoneId=${ms.id}`),
+      R(`http://t/api/tasks?milestoneId=${ms.id}`),
     );
     expect(await listRes.json()).toHaveLength(0);
   });
 
   it("bulk PATCH /api/tasks updates many tasks in a single call", async () => {
     const ms = await (
-      await milestones.POST(post("http://t/api/milestones", { projectId, title: "Bulk patch" }))
+      await milestones.POST(
+        post("http://t/api/milestones", { projectId, title: "Bulk patch" }),
+      )
     ).json();
     const created = await (
       await tasks.POST(
@@ -469,15 +522,21 @@ describe("API routes", () => {
     );
     expect(res.status).toBe(200);
     const updated = await res.json();
-    expect(updated.every((t: { status: string }) => t.status === "done")).toBe(true);
+    expect(updated.every((t: { status: string }) => t.status === "done")).toBe(
+      true,
+    );
   });
 
   it("PATCH /api/tasks/[id] passes through verified + artifacts + milestone outcome", async () => {
     const ms = await (
-      await milestones.POST(post("http://t/api/milestones", { projectId, title: "Enrichments" }))
+      await milestones.POST(
+        post("http://t/api/milestones", { projectId, title: "Enrichments" }),
+      )
     ).json();
     const t = await (
-      await tasks.POST(post("http://t/api/tasks", { milestoneId: ms.id, title: "Code" }))
+      await tasks.POST(
+        post("http://t/api/tasks", { milestoneId: ms.id, title: "Code" }),
+      )
     ).json();
     const upd = await (
       await taskById.PATCH(
@@ -491,7 +550,7 @@ describe("API routes", () => {
     expect(upd.verified).toBe(true);
     // detail returns the artifacts
     const detail = await (
-      await taskById.GET(new Request(`http://t/api/tasks/${t.id}`), ctx(t.id))
+      await taskById.GET(R(`http://t/api/tasks/${t.id}`), ctx(t.id))
     ).json();
     expect(detail.artifacts).toHaveLength(1);
     expect(detail.artifacts[0].value).toBe("deadbeef");
@@ -505,19 +564,19 @@ describe("API routes", () => {
   it("GET /api/tasks?limit= is clamped (does not throw; respects an explicit small limit)", async () => {
     // explicit small limit returns at most that many
     const small = await tasks.GET(
-      new Request(`http://t/api/tasks?solutionId=${solutionId}&limit=1`),
+      R(`http://t/api/tasks?solutionId=${solutionId}&limit=1`),
     );
     expect(small.status).toBe(200);
     expect((await small.json()).length).toBeLessThanOrEqual(1);
     // an absurd limit is clamped (no error, still returns)
     const huge = await tasks.GET(
-      new Request(`http://t/api/tasks?solutionId=${solutionId}&limit=999999`),
+      R(`http://t/api/tasks?solutionId=${solutionId}&limit=999999`),
     );
     expect(huge.status).toBe(200);
     expect(Array.isArray(await huge.json())).toBe(true);
     // a garbage limit falls back to the default (no error)
     const bad = await tasks.GET(
-      new Request(`http://t/api/tasks?solutionId=${solutionId}&limit=abc`),
+      R(`http://t/api/tasks?solutionId=${solutionId}&limit=abc`),
     );
     expect(bad.status).toBe(200);
   });
@@ -538,48 +597,124 @@ describe("API routes", () => {
       "x-api-key": token,
     });
     const postAs = (token: string, url: string, body: unknown) =>
-      new Request(url, { method: "POST", headers: auth(token), body: JSON.stringify(body) });
+      R(url, {
+        method: "POST",
+        headers: auth(token),
+        body: JSON.stringify(body),
+      });
     const patchAs = (token: string, url: string, body: unknown) =>
-      new Request(url, { method: "PATCH", headers: auth(token), body: JSON.stringify(body) });
+      R(url, {
+        method: "PATCH",
+        headers: auth(token),
+        body: JSON.stringify(body),
+      });
     const getAs = (token: string, url: string) =>
-      new Request(url, { headers: { "x-api-key": token } });
+      R(url, { headers: { "x-api-key": token } });
 
     beforeAll(async () => {
-      solA = (await (await solutions.POST(post("http://t/api/solutions", { name: "ScopeA" }))).json()).id;
-      solB = (await (await solutions.POST(post("http://t/api/solutions", { name: "ScopeB" }))).json()).id;
-      const pA = (await (await projects.POST(post("http://t/api/projects", { solutionId: solA, name: "PA" }))).json()).id;
-      const pB = (await (await projects.POST(post("http://t/api/projects", { solutionId: solB, name: "PB" }))).json()).id;
-      msA = (await (await milestones.POST(post("http://t/api/milestones", { projectId: pA, title: "MA" }))).json()).id;
-      msB = (await (await milestones.POST(post("http://t/api/milestones", { projectId: pB, title: "MB" }))).json()).id;
-      taskB = (await (await tasks.POST(post("http://t/api/tasks", { milestoneId: msB, title: "secret B" }))).json()).id;
+      solA = (
+        await (
+          await solutions.POST(
+            post("http://t/api/solutions", { name: "ScopeA" }),
+          )
+        ).json()
+      ).id;
+      solB = (
+        await (
+          await solutions.POST(
+            post("http://t/api/solutions", { name: "ScopeB" }),
+          )
+        ).json()
+      ).id;
+      const pA = (
+        await (
+          await projects.POST(
+            post("http://t/api/projects", { solutionId: solA, name: "PA" }),
+          )
+        ).json()
+      ).id;
+      const pB = (
+        await (
+          await projects.POST(
+            post("http://t/api/projects", { solutionId: solB, name: "PB" }),
+          )
+        ).json()
+      ).id;
+      msA = (
+        await (
+          await milestones.POST(
+            post("http://t/api/milestones", { projectId: pA, title: "MA" }),
+          )
+        ).json()
+      ).id;
+      msB = (
+        await (
+          await milestones.POST(
+            post("http://t/api/milestones", { projectId: pB, title: "MB" }),
+          )
+        ).json()
+      ).id;
+      taskB = (
+        await (
+          await tasks.POST(
+            post("http://t/api/tasks", { milestoneId: msB, title: "secret B" }),
+          )
+        ).json()
+      ).id;
       // A write key scoped to solution A (default scope = write).
-      const k = await (await keys.POST(post("http://t/api/keys", { actorName: "scopeA-agent", solutionId: solA }))).json();
+      const k = await (
+        await keys.POST(
+          post("http://t/api/keys", {
+            actorName: "scopeA-agent",
+            solutionId: solA,
+          }),
+        )
+      ).json();
       scopedTokenA = k.token;
     });
 
     it("can create a task in its own solution (201)", async () => {
-      const res = await tasks.POST(postAs(scopedTokenA, "http://t/api/tasks", { milestoneId: msA, title: "in A" }));
+      const res = await tasks.POST(
+        postAs(scopedTokenA, "http://t/api/tasks", {
+          milestoneId: msA,
+          title: "in A",
+        }),
+      );
       expect(res.status).toBe(201);
     });
 
     it("cannot create a task in another solution (403)", async () => {
-      const res = await tasks.POST(postAs(scopedTokenA, "http://t/api/tasks", { milestoneId: msB, title: "into B" }));
+      const res = await tasks.POST(
+        postAs(scopedTokenA, "http://t/api/tasks", {
+          milestoneId: msB,
+          title: "into B",
+        }),
+      );
       expect(res.status).toBe(403);
       // and B did not gain the task
-      const listB = await tasks.GET(new Request(`http://t/api/tasks?milestoneId=${msB}`));
-      expect((await listB.json()).every((t: { title: string }) => t.title !== "into B")).toBe(true);
+      const listB = await tasks.GET(R(`http://t/api/tasks?milestoneId=${msB}`));
+      expect(
+        (await listB.json()).every(
+          (t: { title: string }) => t.title !== "into B",
+        ),
+      ).toBe(true);
     });
 
     it("cannot update a task in another solution (403)", async () => {
       const res = await taskById.PATCH(
-        patchAs(scopedTokenA, `http://t/api/tasks/${taskB}`, { status: "in_progress" }),
+        patchAs(scopedTokenA, `http://t/api/tasks/${taskB}`, {
+          status: "in_progress",
+        }),
         ctx(taskB),
       );
       expect(res.status).toBe(403);
     });
 
     it("cannot read a single task in another solution (403)", async () => {
-      const res = await taskById.GET(getAs(scopedTokenA, `http://t/api/tasks/${taskB}`), ctx(taskB));
+      const res = await taskById.GET(
+        getAs(scopedTokenA, `http://t/api/tasks/${taskB}`),
+        ctx(taskB),
+      );
       expect(res.status).toBe(403);
     });
 
@@ -593,16 +728,24 @@ describe("API routes", () => {
 
     it("list/search are forced to its own solution (cannot enumerate B)", async () => {
       // listTasks with a B filter is overridden to A -> no B tasks
-      const list = await tasks.GET(getAs(scopedTokenA, `http://t/api/tasks?solutionId=${solB}`));
+      const list = await tasks.GET(
+        getAs(scopedTokenA, `http://t/api/tasks?solutionId=${solB}`),
+      );
       expect(list.status).toBe(200);
       const items = await list.json();
       expect(items.every((t: { id: string }) => t.id !== taskB)).toBe(true);
       // search is forced to A as well
-      const search = await tasksSearch.GET(getAs(scopedTokenA, "http://t/api/tasks/search?q=secret"));
+      const search = await tasksSearch.GET(
+        getAs(scopedTokenA, "http://t/api/tasks/search?q=secret"),
+      );
       expect(search.status).toBe(200);
-      expect((await search.json()).every((t: { id: string }) => t.id !== taskB)).toBe(true);
+      expect(
+        (await search.json()).every((t: { id: string }) => t.id !== taskB),
+      ).toBe(true);
       // listSolutions returns only A
-      const sols = await solutions.GET(getAs(scopedTokenA, "http://t/api/solutions"));
+      const sols = await solutions.GET(
+        getAs(scopedTokenA, "http://t/api/solutions"),
+      );
       const solIds = (await sols.json()).map((s: { id: string }) => s.id);
       expect(solIds).toContain(solA);
       expect(solIds).not.toContain(solB);
@@ -610,13 +753,25 @@ describe("API routes", () => {
 
     it("cannot create or mutate another solution; can update its own", async () => {
       // create another solution -> 403
-      const create = await solutions.POST(postAs(scopedTokenA, "http://t/api/solutions", { name: "Nope" }));
+      const create = await solutions.POST(
+        postAs(scopedTokenA, "http://t/api/solutions", { name: "Nope" }),
+      );
       expect(create.status).toBe(403);
       // mutate B -> 403
-      const mutB = await clientById.PATCH(patchAs(scopedTokenA, `http://t/api/solutions/${solB}`, { name: "hijack" }), ctx(solB));
+      const mutB = await clientById.PATCH(
+        patchAs(scopedTokenA, `http://t/api/solutions/${solB}`, {
+          name: "hijack",
+        }),
+        ctx(solB),
+      );
       expect(mutB.status).toBe(403);
       // mutate its own A -> 200
-      const mutA = await clientById.PATCH(patchAs(scopedTokenA, `http://t/api/solutions/${solA}`, { description: "owned" }), ctx(solA));
+      const mutA = await clientById.PATCH(
+        patchAs(scopedTokenA, `http://t/api/solutions/${solA}`, {
+          description: "owned",
+        }),
+        ctx(solA),
+      );
       expect(mutA.status).toBe(200);
     });
 
@@ -625,7 +780,9 @@ describe("API routes", () => {
       expect(res.status).toBe(200);
       const list = await res.json();
       expect(list.length).toBeGreaterThanOrEqual(1);
-      expect(list.every((k: { solutionId: string | null }) => k.solutionId === solA)).toBe(true);
+      expect(
+        list.every((k: { solutionId: string | null }) => k.solutionId === solA),
+      ).toBe(true);
     });
 
     it("GET /api/dashboard is confined to the scoped solution; admin sees both", async () => {
@@ -662,7 +819,9 @@ describe("API routes", () => {
       expect(scopedTitles).not.toContain("secret B");
       expect(scopedTitles).not.toContain("URGENT B leak probe");
       expect(
-        scopedPayload.attention.every((t: { id: string }) => t.id !== urgentB.id),
+        scopedPayload.attention.every(
+          (t: { id: string }) => t.id !== urgentB.id,
+        ),
       ).toBe(true);
       expect(
         scopedPayload.recent.every((t: { id: string }) => t.id !== taskB),
@@ -670,11 +829,11 @@ describe("API routes", () => {
       expect(scopedPayload.completedIds.solutions).not.toContain(solB);
 
       // Admin/unscoped dashboard: both solutions, B titles present.
-      const adminRes = await dashboard.GET(
-        new Request("http://t/api/dashboard"),
-      );
+      const adminRes = await dashboard.GET(R("http://t/api/dashboard"));
       const adminPayload = await adminRes.json();
-      const adminSolIds = adminPayload.solutions.map((s: { id: string }) => s.id);
+      const adminSolIds = adminPayload.solutions.map(
+        (s: { id: string }) => s.id,
+      );
       expect(adminSolIds).toContain(solA);
       expect(adminSolIds).toContain(solB);
       expect(adminPayload.totals.solutions).toBeGreaterThanOrEqual(2);
@@ -685,12 +844,23 @@ describe("API routes", () => {
 
     it("an admin/unscoped key is unaffected (can read across solutions)", async () => {
       // unscoped write key created in open mode
-      const unscoped = await (await keys.POST(post("http://t/api/keys", { actorName: "global-agent" }))).json();
-      const res = await taskById.GET(getAs(unscoped.token, `http://t/api/tasks/${taskB}`), ctx(taskB));
+      const unscoped = await (
+        await keys.POST(
+          post("http://t/api/keys", { actorName: "global-agent" }),
+        )
+      ).json();
+      const res = await taskById.GET(
+        getAs(unscoped.token, `http://t/api/tasks/${taskB}`),
+        ctx(taskB),
+      );
       expect(res.status).toBe(200);
-      // and anonymous (open mode) too
-      const anon = await taskById.GET(new Request(`http://t/api/tasks/${taskB}`), ctx(taskB));
-      expect(anon.status).toBe(200);
+      // but an untrusted keyless client (no browser headers, no key - e.g. an
+      // unkeyed MCP/CLI caller) sees nothing: 401.
+      const anon = await taskById.GET(
+        new Request(`http://t/api/tasks/${taskB}`),
+        ctx(taskB),
+      );
+      expect(anon.status).toBe(401);
     });
   });
 
@@ -702,7 +872,7 @@ describe("API routes", () => {
       await keys.POST(post("http://t/api/keys", { actorName: "attacker" }))
     ).json();
     const res = await keyById.DELETE(
-      new Request(`http://t/api/keys/${victim.id}`, {
+      R(`http://t/api/keys/${victim.id}`, {
         method: "DELETE",
         headers: { "x-api-key": attacker.token },
       }),

@@ -99,7 +99,7 @@
     "list": "List",
     "kanban": "Kanban",
     "emptyKanbanColumn": "None",
-    "noSolutions": "No solutions. Create one via the API / console.",
+    "noSolutions": "No solutions yet. Create the first one below.",
     "noProjects": "No projects. Create one via the API.",
     "noMilestones": "No milestones. Create one via the API.",
     "noTasks": "No tasks in this milestone. Add the first one.",

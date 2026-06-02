@@ -8,7 +8,7 @@ import { useT } from "@/i18n/provider";
 // UI version. Scheme vMAJOR.MINOR: MINOR grows +1 with EVERY commit
 // (1.01, 1.02, ...), MAJOR jumps when we turn the concept upside down
 // (-> 2.00). Bump it on every commit that touches the UI.
-const UI_VERSION = "1.23";
+const UI_VERSION = "1.24";
 
 // Main menu (sidebar). Order from the top: Overview, Explorer, Users, Settings.
 // labelKey is resolved through i18n at render time (not a literal, so it stays multilingual).
