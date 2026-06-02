@@ -157,11 +157,12 @@ function toTaskWithContext(row: CtxRow): TaskWithContext {
 const OPEN_STATUSES = `'todo','in_progress','blocked'`;
 
 /** Correlated-subquery scope fragments tying a `tasks t` subquery to the outer
- *  milestone (m) / project (p) / solution (s) row. Used by fullyDone() and the
- *  completion rollups. Each ends in a WHERE so the caller appends `AND ...`. */
+ *  milestone (m) / project (p) row. Used by fullyDone() and the task-timing part
+ *  of the completion rollups. Each ends in a WHERE so the caller appends `AND ...`.
+ *  (Solution/project COMPLETION is milestone-aware - see projectFullyDone /
+ *  solutionFullyDone below - not a raw cross-milestone task tally.) */
 const MILESTONE_SCOPE = `WHERE t.milestoneId = m.id`;
 const PROJECT_SCOPE = `JOIN milestones m ON t.milestoneId = m.id WHERE m.projectId = p.id`;
-const SOLUTION_SCOPE = `JOIN milestones m ON t.milestoneId = m.id JOIN projects p ON m.projectId = p.id WHERE p.solutionId = s.id`;
 
 /** SQL predicate: the entity scoped by `scope` is "fully done" - it has at least
  *  one done task and no open tasks. `scope` is one of the *_SCOPE fragments above
@@ -170,6 +171,30 @@ const SOLUTION_SCOPE = `JOIN milestones m ON t.milestoneId = m.id JOIN projects 
 const fullyDone = (scope: string) =>
   `((SELECT COUNT(*) FROM tasks t ${scope} AND t.status='done') > 0
         AND (SELECT COUNT(*) FROM tasks t ${scope} AND t.status IN (${OPEN_STATUSES})) = 0)`;
+
+/** SQL predicate: the milestone with row alias `m` is "complete" - its status is
+ *  done/archived OR it is fully done by tasks (>=1 done, 0 open). The building
+ *  block for the project/solution rollups below. */
+const milestoneComplete = (m: string) =>
+  `(${m}.status IN ('done','archived') OR ${fullyDone(`WHERE t.milestoneId = ${m}.id`)})`;
+
+/** SQL predicate: the project with row alias `p` is "fully done" - it has at
+ *  least one milestone and EVERY milestone is complete. Derived from milestone
+ *  completion (not a raw task tally) so an empty/active milestone keeps the
+ *  project open instead of one finished milestone closing the whole project
+ *  while sibling milestones still hold open work. */
+const projectFullyDone = (p: string) =>
+  `(EXISTS (SELECT 1 FROM milestones m WHERE m.projectId = ${p}.id)
+    AND NOT EXISTS (SELECT 1 FROM milestones m WHERE m.projectId = ${p}.id
+                      AND NOT ${milestoneComplete("m")}))`;
+
+/** SQL predicate: the solution with row alias `s` is "fully done" - it has at
+ *  least one project and EVERY project is complete (status done/archived OR
+ *  projectFullyDone). An empty project (no milestones) keeps the solution open. */
+const solutionFullyDone = (s: string) =>
+  `(EXISTS (SELECT 1 FROM projects p WHERE p.solutionId = ${s}.id)
+    AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.solutionId = ${s}.id
+                      AND NOT (p.status IN ('done','archived') OR ${projectFullyDone("p")})))`;
 
 /** Public api_keys columns (everything EXCEPT secretHash). Reads that surface a
  *  key to a caller select this explicit list so the secret hash is never pulled
@@ -1869,13 +1894,13 @@ export class Repo {
       projectsDone: this.scalar(
         `SELECT COUNT(*) AS n FROM projects p
          ${prWhere} (p.status IN ('done','archived')
-            OR ${fullyDone(PROJECT_SCOPE)})`,
+            OR ${projectFullyDone("p")})`,
         sid,
       ),
       solutionsDone: this.scalar(
         `SELECT COUNT(*) AS n FROM solutions s
          ${slWhere} (s.status = 'archived'
-            OR ${fullyDone(SOLUTION_SCOPE)})`,
+            OR ${solutionFullyDone("s")})`,
         sid,
       ),
     };
@@ -1911,13 +1936,13 @@ export class Repo {
       projects: this.idList(
         `SELECT p.id AS id FROM projects p
          ${prWhere} (p.status IN ('done','archived')
-            OR ${fullyDone(PROJECT_SCOPE)})`,
+            OR ${projectFullyDone("p")})`,
         sid,
       ),
       solutions: this.idList(
         `SELECT s.id AS id FROM solutions s
          ${slWhere} (s.status = 'archived'
-            OR ${fullyDone(SOLUTION_SCOPE)})`,
+            OR ${solutionFullyDone("s")})`,
         sid,
       ),
     };
@@ -1977,7 +2002,7 @@ export class Repo {
       ),
       projects: this.scalar(
         `SELECT COUNT(*) AS n FROM projects p
-         ${prSolWhere} (p.status IN ('done','archived') OR ${fullyDone(PROJECT_SCOPE)})
+         ${prSolWhere} (p.status IN ('done','archived') OR ${projectFullyDone("p")})
            AND ${maxDoneToday(PROJECT_SCOPE)}`,
         [...sid, startIso],
       ),

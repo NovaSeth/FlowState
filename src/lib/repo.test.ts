@@ -484,6 +484,45 @@ describe("Repo - comments and dashboard", () => {
     expect(ids.solutions).toContain(c.id);
   });
 
+  it("dashboard.completed: a project with an empty active milestone is NOT counted done", () => {
+    const repo = freshRepo();
+    const c = repo.createSolution({ name: "Acme" });
+    const p = repo.createProject({ solutionId: c.id, name: "Web" });
+    const m1 = repo.createMilestone({ projectId: p.id, title: "M1" }).id;
+    const m2 = repo.createMilestone({ projectId: p.id, title: "M2" }).id; // empty, active
+    repo.updateTask(repo.createTask({ milestoneId: m1, title: "A" }).id, { status: "done" });
+
+    // M1 is fully done, but M2 still holds open milestone work -> the project
+    // (and solution) must NOT count as completed for gamification.
+    let d = repo.getDashboard();
+    expect(d.completed.milestonesDone).toBe(1);
+    expect(d.completed.projectsDone).toBe(0);
+    expect(d.completed.solutionsDone).toBe(0);
+    expect(d.completedIds.projects).not.toContain(p.id);
+    expect(d.completedIds.solutions).not.toContain(c.id);
+
+    // finish M2 too -> now the project and solution roll up to done.
+    repo.updateTask(repo.createTask({ milestoneId: m2, title: "B" }).id, { status: "done" });
+    d = repo.getDashboard();
+    expect(d.completed.projectsDone).toBe(1);
+    expect(d.completed.solutionsDone).toBe(1);
+    expect(d.completedIds.projects).toContain(p.id);
+    expect(d.completedIds.solutions).toContain(c.id);
+  });
+
+  it("dashboard.completed: a solution with an empty project (no milestones) is NOT counted done", () => {
+    const repo = freshRepo();
+    const c = repo.createSolution({ name: "Acme" });
+    const p1 = repo.createProject({ solutionId: c.id, name: "Web" });
+    repo.createProject({ solutionId: c.id, name: "Mobile" }); // empty, no milestones
+    const m = repo.createMilestone({ projectId: p1.id, title: "M1" }).id;
+    repo.updateTask(repo.createTask({ milestoneId: m, title: "A" }).id, { status: "done" });
+
+    const d = repo.getDashboard();
+    expect(d.completed.projectsDone).toBe(1); // Web is done
+    expect(d.completed.solutionsDone).toBe(0); // Mobile is still empty/open
+  });
+
   it("dashboard.completed: an archived milestone counts as done even without tasks", () => {
     const repo = freshRepo();
     const c = repo.createSolution({ name: "Acme" });
