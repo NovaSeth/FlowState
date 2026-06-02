@@ -11,10 +11,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # node:sqlite (DatabaseSync) ships from Node 22.5, but the dev toolchain
-        # (vitest 4 -> vite 8 / rolldown) requires >=22.12, so 22.12 is the real
-        # floor we can install and test on. Test that floor plus the current major.
-        node: ["22.12.0", "24.x"]
+        # node:sqlite (DatabaseSync) ships from Node 22.5 but stays behind
+        # --experimental-sqlite in the 22 line (unflagged only from the 24 line).
+        # The dev toolchain (vitest 4 -> vite 8 / rolldown) also needs >=22.12, so
+        # 22.12 is the lowest floor we can install on - test it WITH the flag (via
+        # NODE_OPTIONS, inherited by next build + vitest workers), and the current
+        # major without it.
+        include:
+          - node: "22.12.0"
+            nodeOptions: "--experimental-sqlite"
+          - node: "24.x"
+            nodeOptions: ""
+    env:
+      NODE_OPTIONS: ${{ matrix.nodeOptions }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
