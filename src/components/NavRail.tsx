@@ -8,7 +8,7 @@ import { useT } from "@/i18n/provider";
 // UI version. Scheme vMAJOR.MINOR: MINOR grows +1 with EVERY commit
 // (1.01, 1.02, ...), MAJOR jumps when we turn the concept upside down
 // (-> 2.00). Bump it on every commit that touches the UI.
-const UI_VERSION = "1.24";
+const UI_VERSION = "1.25";
 
 // Main menu (sidebar). Order from the top: Overview, Explorer, Users, Settings.
 // labelKey is resolved through i18n at render time (not a literal, so it stays multilingual).
@@ -93,7 +93,7 @@ export function MobileTabBar() {
   return (
     <nav
       aria-label={t("nav.menu")}
-      className="flex shrink-0 border-t border-edge bg-canvas pb-[env(safe-area-inset-bottom)]"
+      className="flex shrink-0 border-t border-black/10 bg-brand pb-[env(safe-area-inset-bottom)]"
     >
       {ITEMS.map((item) => {
         const on = item.match(pathname);
@@ -104,11 +104,19 @@ export function MobileTabBar() {
             href={item.href}
             aria-label={label}
             aria-current={on ? "page" : undefined}
-            className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-medium tracking-wide transition-colors active:bg-canvas-subtle ${
-              on ? "text-accent" : "text-fg-subtle"
+            // Same palette as the desktop rail: brand bg, white icons, and a
+            // white pill on the active icon (brand-colored glyph inside).
+            className={`flex flex-1 flex-col items-center gap-1 py-2 text-[10px] font-medium tracking-wide transition-colors ${
+              on ? "text-white" : "text-white/70 active:text-white"
             }`}
           >
-            <Icon name={item.icon} size={22} />
+            <span
+              className={`flex h-8 w-10 items-center justify-center rounded-md ${
+                on ? "bg-white text-brand" : ""
+              }`}
+            >
+              <Icon name={item.icon} size={20} />
+            </span>
             {label}
           </Link>
         );

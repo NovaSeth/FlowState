@@ -187,40 +187,70 @@ export function DrillHeader({
   title,
   count,
   sub,
+  crumbs,
   onBack,
 }: {
   level: number;
   title: string;
   count?: number;
   sub?: ReactNode;
+  // Breadcrumb trail kept on the left across deeper levels (e.g. solution ->
+  // project -> milestone). When set, the level label + count move to the right.
+  crumbs?: string[];
   onBack: () => void;
 }) {
   const t = useT();
+  const levelLabel = (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
+        {title}
+      </span>
+      {count !== undefined && (
+        <span className="rounded-full bg-neutral-muted px-1.5 py-0.5 font-mono text-[10px] text-fg-muted">
+          {count}
+        </span>
+      )}
+    </span>
+  );
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-edge bg-canvas px-2 py-2">
       {level > 0 && (
         <button
           onClick={onBack}
-          className="-ml-1 flex shrink-0 items-center gap-0.5 rounded-md py-2 pl-1 pr-2.5 text-sm font-medium text-accent active:bg-canvas-subtle"
+          className="-ml-1 flex shrink-0 items-center rounded-md p-2 text-accent active:bg-canvas-subtle"
           aria-label={t("common.back")}
         >
-          <Icon name="chevron" size={18} className="rotate-180" />
-          {t("common.back")}
+          <Icon name="chevron" size={20} className="rotate-180" />
         </button>
       )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
-            {title}
-          </span>
-          {count !== undefined && (
-            <span className="rounded-full bg-neutral-muted px-1.5 py-0.5 font-mono text-[10px] text-fg-muted">
-              {count}
-            </span>
+      {crumbs && crumbs.length > 0 ? (
+        // Breadcrumb (solution / project / milestone) on the left; level label
+        // + count pushed right.
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center truncate text-sm">
+            {crumbs.map((c, i) => (
+              <span key={i} className="flex min-w-0 items-center">
+                {i > 0 && (
+                  <span className="shrink-0 px-1 text-fg-subtle">/</span>
+                )}
+                <span
+                  className={`truncate ${i === 0 ? "font-semibold text-fg" : "text-fg-muted"}`}
+                >
+                  {c}
+                </span>
+              </span>
+            ))}
+          </div>
+          {levelLabel}
+        </div>
+      ) : (
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">{levelLabel}</div>
+          {sub && (
+            <div className="truncate text-sm font-medium text-fg">{sub}</div>
           )}
         </div>
-        {sub && <div className="truncate text-sm font-medium text-fg">{sub}</div>}
-      </div>
+      )}
     </div>
   );
 }

@@ -455,18 +455,20 @@ export function Explorer({
       t("explorer.milestones"),
       t("explorer.tasks"),
     ];
-    const subs = [
-      undefined,
-      selectedSolName,
-      selectedProjName,
-      selectedMsTitle,
-    ];
     const counts = [
       solutions.length,
       projects.length,
       milestones.length,
       tasks.length,
     ];
+    // Breadcrumb trail kept on the header across levels: solution / project /
+    // milestone (as deep as the current level), so the solution stays visible
+    // even inside a project or milestone.
+    const crumbs = [
+      level >= 1 ? selectedSolName : undefined,
+      level >= 2 ? selectedProjName : undefined,
+      level >= 3 ? selectedMsTitle : undefined,
+    ].filter((c): c is string => Boolean(c));
     const body =
       level === 3 ? (
         <div className="flex min-h-0 flex-1 flex-col bg-canvas">
@@ -490,7 +492,7 @@ export function Explorer({
             level={level}
             title={titles[level]}
             count={counts[level]}
-            sub={subs[level]}
+            crumbs={crumbs}
             onBack={goBack}
           />
           {body}
