@@ -22,8 +22,6 @@ jobs:
             nodeOptions: "--experimental-sqlite"
           - node: "24.x"
             nodeOptions: ""
-    env:
-      NODE_OPTIONS: ${{ matrix.nodeOptions }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,5 +37,12 @@ jobs:
             ${{ runner.os }}-node${{ matrix.node }}-next-${{ hashFiles('**/package-lock.json') }}-
       - run: npm run typecheck
       - run: npm run lint
+      # Only build + test evaluate node:sqlite, so scope the flag to them - the
+      # runner's own node20 (actions/checkout etc.) rejects --experimental-sqlite
+      # in NODE_OPTIONS, so it must NOT be set job-wide.
       - run: npm run build
+        env:
+          NODE_OPTIONS: ${{ matrix.nodeOptions }}
       - run: npm run test
+        env:
+          NODE_OPTIONS: ${{ matrix.nodeOptions }}
