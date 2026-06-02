@@ -32,7 +32,9 @@ import type {
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { "content-type": "application/json" },
+    // x-fs-dashboard marks this as the local dashboard so the API trusts it
+    // keyless even over plain HTTP/LAN (a phone), where Sec-Fetch-* is absent.
+    headers: { "content-type": "application/json", "x-fs-dashboard": "1" },
     ...init,
   });
   if (!res.ok) {

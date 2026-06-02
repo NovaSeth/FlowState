@@ -20,6 +20,11 @@ describe("keyless API access (no x-api-key)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("allows the dashboard's tagged read (x-fs-dashboard) regardless of network", async () => {
+    const res = await read(get({ "x-fs-dashboard": "1" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
   it("denies a non-browser client without a key (MCP / CLI / node)", async () => {
     const res = await read(get({}), ctx);
     expect(res.status).toBe(401);

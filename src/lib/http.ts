@@ -119,29 +119,31 @@ export async function readJson(req: Request): Promise<unknown> {
  * A keyless request is trusted only when it comes from the local dashboard or the
  * menu-bar app. Everything else (the MCP server, a CLI, an external/embedded page)
  * must present an API key - without one it sees nothing.
- * - The menu-bar app marks its read-only polling with `x-fs-monitor: 1`.
- * - A same-origin browser sends `Sec-Fetch-Site: same-origin|same-site|none`; a
- *   node fetch / curl / the MCP server omit the header entirely, and a foreign page
- *   embedding us sends `cross-site`. Both are treated as untrusted.
- * - Sec-Fetch-* headers are only sent to "potentially trustworthy" origins (HTTPS
- *   or localhost), so the dashboard opened on a phone over plain HTTP/LAN gets
- *   none. There we fall back to a same-origin Origin/Referer check: a browser
- *   fetch carries an Origin/Referer whose host matches ours; a node/curl/MCP
- *   client carries neither.
- * This is a header heuristic, sufficient for a single-user local trust model (the
- * header cannot be forged by a non-browser client, but is not a security boundary
- * against a determined local attacker - that is what API keys are for).
+ * - The dashboard's REST client tags every call with `x-fs-dashboard: 1`, and the
+ *   menu-bar app marks its polling with `x-fs-monitor: 1`. These explicit markers
+ *   are the primary signal - they work regardless of the network (a phone over
+ *   plain HTTP/LAN, where Sec-Fetch-* and a trustworthy origin are absent). A
+ *   cross-origin page cannot set them without a CORS preflight we never grant.
+ * - As a fallback (e.g. a same-origin EventSource / direct navigation that can't
+ *   set custom headers): a same-origin browser sends `Sec-Fetch-Site:
+ *   same-origin|same-site|none`, or - when Sec-Fetch is absent - an Origin/Referer
+ *   whose host matches ours. A node fetch / curl / the MCP server carry none of
+ *   these; a foreign page sends `cross-site` or a mismatching host.
+ * This is a header heuristic, sufficient for a single-user local trust model (not a
+ * security boundary against a determined local attacker - that is what keys are for).
  */
 function isTrustedKeylessClient(req: Request): boolean {
+  if (req.headers.get("x-fs-dashboard") === "1") return true;
   if (req.headers.get("x-fs-monitor") === "1") return true;
   const site = req.headers.get("sec-fetch-site");
   if (site !== null) return site !== "cross-site";
-  // No Sec-Fetch-Site (plain-HTTP/LAN browser, e.g. a phone): trust only when the
-  // request is same-origin per its Origin/Referer; an MCP/CLI client has neither.
+  // No Sec-Fetch-Site (plain-HTTP/LAN browser): trust only a same-origin request
+  // per its Origin/Referer host vs the Host we were reached on; MCP/CLI has none.
   const from = req.headers.get("origin") ?? req.headers.get("referer");
   if (!from) return false;
+  const host = req.headers.get("host") ?? new URL(req.url).host;
   try {
-    return new URL(from).host === new URL(req.url).host;
+    return new URL(from).host === host;
   } catch {
     return false;
   }
