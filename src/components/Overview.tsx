@@ -50,7 +50,7 @@ export function Overview({ initial }: { initial: DashboardPayload }) {
 
       <section className="space-y-3">
         <Eyebrow>{t("overview.solutions")}</Eyebrow>
-        <div className="space-y-4">
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           {d.solutions.map((s) => (
             <SolutionBlock key={s.id} solution={s} />
           ))}

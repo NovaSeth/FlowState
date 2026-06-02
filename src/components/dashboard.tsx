@@ -4,16 +4,13 @@ import Link from "next/link";
 import {
   AttentionTask,
   DashboardSolution,
-  ProjectRollup,
   TaskWithContext,
 } from "@/lib/types";
-import { PROJECT_STATUS_META } from "@/lib/labels";
 import { timeAgoText } from "@/lib/format";
 import { useT } from "@/i18n/provider";
 import {
   Card,
   Eyebrow,
-  MetaPill,
   PriorityBadge,
   ProgressMeter,
   StatusPill,
@@ -143,32 +140,6 @@ export function RecentFeed({ tasks }: { tasks: TaskWithContext[] }) {
   );
 }
 
-function ProjectRollupRow({ project }: { project: ProjectRollup }) {
-  const t = useT();
-  return (
-    <Link
-      href={`/projects/${project.id}`}
-      className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 rounded-md border border-edge bg-canvas px-4 py-3 transition-all hover:border-accent hover:shadow-hover sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon name="project" size={16} />
-        <span className="truncate text-sm font-medium text-fg">
-          {project.name}
-        </span>
-      </div>
-      <div className="col-span-2 sm:col-span-1 sm:min-w-[180px]">
-        <ProgressMeter progress={project.progress} counts={project.statusCounts} />
-      </div>
-      <div className="flex items-center justify-end gap-3">
-        <span className="font-mono text-[11px] text-fg-subtle">
-          {t("units.taskShort", { n: project.progress.total })}
-        </span>
-        <MetaPill meta={PROJECT_STATUS_META[project.status]} size="sm" />
-      </div>
-    </Link>
-  );
-}
-
 export function SolutionBlock({ solution }: { solution: DashboardSolution }) {
   // `tr` (not `t`) so it does not collide with the `t` task loop variable below.
   const tr = useT();
@@ -199,19 +170,8 @@ export function SolutionBlock({ solution }: { solution: DashboardSolution }) {
           />
         </div>
       </div>
-      <div className="flex flex-col gap-2 p-3">
-        {solution.projects.length === 0 ? (
-          <p className="px-1 py-2 text-sm text-fg-subtle">
-            {tr("overview.noProjectsInSolution")}
-          </p>
-        ) : (
-          solution.projects.map((p) => (
-            <ProjectRollupRow key={p.id} project={p} />
-          ))
-        )}
-      </div>
       {solution.recentTasks && solution.recentTasks.length > 0 && (
-        <div className="border-t border-edge-muted px-3 py-2">
+        <div className="px-3 py-2">
           <div className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
             <Icon name="clock" size={12} />
             {tr("overview.recent")}
