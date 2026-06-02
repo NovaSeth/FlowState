@@ -37,7 +37,7 @@ import {
   CreateMilestoneInput,
   CreateProjectInput,
   CreateTaskInput,
-  DailyBySolution,
+  DailyByStatus,
   DashboardSolution,
   DashboardPayload,
   Milestone,
@@ -53,6 +53,7 @@ import {
   TaskDetail,
   TaskListItem,
   TaskRef,
+  TaskStatus,
   TaskWithContext,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -1976,74 +1977,78 @@ export class Repo {
     };
   }
 
-  /** Cap on the number of distinct days returned by dailyBySolution, so the chart
+  /** Cap on the number of distinct days returned by dailyByStatus, so the chart
    *  payload stays bounded even on a long-lived DB. We keep the most recent days
-   *  that actually have completions. */
+   *  that actually have transitions. */
   private static readonly DAILY_CHART_MAX_DAYS = 60;
 
   /**
-   * Tasks completed per day, broken down by solution - the data behind the live
-   * stacked daily chart. ONE grouped query over completed tasks gives a sparse
-   * (day, solutionId, count) set; we then assemble the dense matrix.
+   * Task status transitions per day - the data behind the live daily line chart.
+   * Reads the activity log (entityType='task', action='status', summary 'old -> new')
+   * and counts, for each day, how many tasks ENTERED each status that day. ONE grouped
+   * query gives a sparse (day, summary, count) set; we derive the target status from
+   * the 'new' side of the summary and assemble the dense matrix.
    *
-   * The day bucket is date(t.completedAt) (local civil date in SQLite, matching the
+   * The day bucket is date(activity.at) (local civil date in SQLite, matching the
    * "TODAY" boundary used elsewhere). Capped to the most recent DAILY_CHART_MAX_DAYS
-   * days that have data; fewer days -> all of them.
+   * days that have transitions; fewer days -> all of them.
    *
-   * Scope: when `solutionId` is set (a solution-scoped key), the query is filtered
-   * to that solution so the series only ever exposes the key's own solution, exactly
-   * like the rest of getDashboard. `solutions` reuses the already-scoped dashboard
-   * solutions list (so the color/name come from the same source the UI shows), and
-   * only solutions that actually have completions appear in the breakdown.
+   * Scope: when `solutionId` is set (a solution-scoped key), the query filters on
+   * activity.solutionId (stamped at record time to the task's solution), so the chart
+   * only ever exposes the key's own solution, exactly like the rest of getDashboard.
+   * `statuses` lists only the statuses with transitions in the window, in canonical
+   * STATUS_ORDER; the UI owns each status' color and label.
    */
-  private dailyBySolution(
-    dashSolutions: { id: string; name: string; color: string }[],
-    solutionId?: string,
-  ): DailyBySolution {
+  private dailyByStatus(solutionId?: string): DailyByStatus {
     const params: (string | number)[] = [];
-    const solWhere = solutionId ? `AND p.solutionId = ?` : ``;
+    const solWhere = solutionId ? `AND solutionId = ?` : ``;
     if (solutionId) params.push(solutionId);
     const rows = this.db
       .prepare(
-        `SELECT date(t.completedAt) AS day, p.solutionId AS sid, COUNT(*) AS c
-         FROM tasks t
-         JOIN milestones m ON t.milestoneId = m.id
-         JOIN projects p ON m.projectId = p.id
-         WHERE t.status = 'done' AND t.completedAt IS NOT NULL ${solWhere}
-         GROUP BY day, sid
+        `SELECT date(at) AS day, summary, COUNT(*) AS c
+         FROM activity
+         WHERE entityType = 'task' AND action = 'status' ${solWhere}
+         GROUP BY day, summary
          ORDER BY day ASC`,
       )
-      .all(...params) as { day: string; sid: string; c: number }[];
+      .all(...params) as { day: string; summary: string; c: number }[];
 
-    // Distinct days in chronological order; keep only the most recent N.
-    const allDays: string[] = [];
-    const seenDay = new Set<string>();
+    // Derive the TARGET status from each "old -> new" summary; tally per (day, status).
+    const validStatus = new Set<string>(TASK_STATUSES);
+    const perDay = new Map<string, Map<string, number>>(); // day -> (status -> count)
+    const days: string[] = [];
     for (const r of rows) {
-      if (!seenDay.has(r.day)) {
-        seenDay.add(r.day);
-        allDays.push(r.day);
+      const target = r.summary.split(" -> ")[1]?.trim();
+      if (!target || !validStatus.has(target)) continue;
+      let m = perDay.get(r.day);
+      if (!m) {
+        m = new Map();
+        perDay.set(r.day, m);
+        days.push(r.day); // rows are day-ascending, so this stays chronological
       }
+      m.set(target, (m.get(target) ?? 0) + Number(r.c));
     }
-    const days = allDays.slice(-Repo.DAILY_CHART_MAX_DAYS);
-    const dayKept = new Set(days);
 
-    // Solutions that actually have completions within the kept window, in the order
-    // of the dashboard solutions list (newest-first), so colors stay stable/consistent.
-    const usedSids = new Set(rows.filter((r) => dayKept.has(r.day)).map((r) => r.sid));
-    const solutions = dashSolutions
-      .filter((s) => usedSids.has(s.id))
-      .map((s) => ({ id: s.id, name: s.name, color: s.color }));
+    // Keep only the most recent N days that have transitions.
+    const keptDays = days.slice(-Repo.DAILY_CHART_MAX_DAYS);
 
-    const dayIndex = new Map(days.map((d, i) => [d, i]));
-    const solIndex = new Map(solutions.map((s, i) => [s.id, i]));
-    const counts = days.map(() => solutions.map(() => 0));
-    for (const r of rows) {
-      const di = dayIndex.get(r.day);
-      const si = solIndex.get(r.sid);
-      if (di === undefined || si === undefined) continue;
-      counts[di][si] = Number(r.c);
+    // Statuses with transitions within the kept window, in canonical STATUS_ORDER.
+    const used = new Set<string>();
+    for (const day of keptDays) {
+      for (const s of perDay.get(day)!.keys()) used.add(s);
     }
-    return { days, solutions, counts };
+    const statuses: TaskStatus[] = TASK_STATUSES.filter((s) => used.has(s));
+
+    const statusIndex = new Map(statuses.map((s, i) => [s, i] as const));
+    const counts = keptDays.map((day) => {
+      const row = statuses.map(() => 0);
+      for (const [s, c] of perDay.get(day)!) {
+        const si = statusIndex.get(s as TaskStatus);
+        if (si !== undefined) row[si] = c;
+      }
+      return row;
+    });
+    return { days: keptDays, statuses, counts };
   }
 
   getDashboard(): DashboardPayload {
@@ -2102,7 +2107,7 @@ export class Repo {
       solutions: dashSolutions,
       attention: this.attentionTasks(scoped),
       recent: this.recentTasks(12, scoped),
-      dailyBySolution: this.dailyBySolution(dashSolutions, scoped),
+      dailyByStatus: this.dailyByStatus(scoped),
     };
   }
 }

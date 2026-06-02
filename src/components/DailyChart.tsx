@@ -1,18 +1,20 @@
 "use client";
 
-import { DailyBySolution } from "@/lib/types";
+import { DailyByStatus, TaskStatus } from "@/lib/types";
+import { STATUS_META } from "@/lib/labels";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
 import { useT } from "@/i18n/provider";
 
 /**
- * Dependency-free, accessible SVG multi-line chart of tasks completed per day,
- * broken down by solution. One line per solution: for solution index s, the line
- * plots a point per day where y = counts[dayIndex][s]. X axis runs left-to-right
- * chronologically; Y axis is the number of completed/closed tasks. Every line uses
- * the solution's own color (or a deterministic fallback palette keyed by index when
- * the color is empty). All lines share one X/Y scale (min 0, common rounded max).
- * Reads straight from the live-refreshed dashboard payload (data.dailyBySolution),
- * so it updates in real time with no extra data source.
+ * Dependency-free, accessible SVG multi-line chart of task STATUS TRANSITIONS per
+ * day. One line per status: for status index s, the line plots a point per day where
+ * y = counts[dayIndex][s] = how many tasks entered that status that day (across all
+ * solutions; a solution-scoped key sees only its own). X axis runs left-to-right
+ * chronologically; Y axis is the number of transitions. Every line uses the status'
+ * own semantic theme color (the same hues as the StatusPills, via CSS variables, so
+ * it tracks light/dark mode). All lines share one X/Y scale (min 0, common max).
+ * Reads straight from the live-refreshed dashboard payload (data.dailyByStatus), so
+ * it updates in real time with no extra data source.
  *
  * No JS tooltip library: per-point context is exposed via a native SVG <title>. The
  * chart scales to its container (viewBox + width 100%), the legend sits below the
@@ -20,22 +22,15 @@ import { useT } from "@/i18n/provider";
  * prefers-reduced-motion.
  */
 
-// Deterministic fallback palette (Primer-ish hues) for solutions without a color.
-// Cycled by index so the same solution keeps the same fallback color between renders.
-const FALLBACK_PALETTE = [
-  "#2f81f7",
-  "#3fb950",
-  "#db61a2",
-  "#e3b341",
-  "#a371f7",
-  "#f0883e",
-  "#39c5cf",
-  "#f85149",
-];
-
-function colorFor(color: string, index: number): string {
-  return color && color.trim() ? color : FALLBACK_PALETTE[index % FALLBACK_PALETTE.length];
-}
+// Each status' line/legend color, as a theme CSS variable (defined in globals.css),
+// matching the StatusPill dot hues so the chart reads consistently across the UI.
+const STATUS_LINE_COLOR: Record<TaskStatus, string> = {
+  todo: "var(--fg-subtle)",
+  in_progress: "var(--accent)",
+  blocked: "var(--danger)",
+  done: "var(--success)",
+  closed: "var(--done)",
+};
 
 // viewBox geometry (logical units; the SVG scales to the container width).
 const VB_WIDTH = 720;
@@ -52,13 +47,13 @@ function shortDay(day: string): string {
   return day.length >= 10 ? day.slice(5) : day;
 }
 
-export function DailyChart({ data }: { data: DailyBySolution }) {
+export function DailyChart({ data }: { data: DailyByStatus }) {
   const t = useT();
   const reduced = useReducedMotion();
 
-  const { days, solutions, counts } = data;
+  const { days, statuses, counts } = data;
   const hasData =
-    days.length > 0 && solutions.length > 0 && counts.some((row) => row.some((n) => n > 0));
+    days.length > 0 && statuses.length > 0 && counts.some((row) => row.some((n) => n > 0));
 
   if (!hasData) {
     return (
@@ -68,7 +63,7 @@ export function DailyChart({ data }: { data: DailyBySolution }) {
     );
   }
 
-  // The single busiest solution-day decides the shared Y scale; lines are not
+  // The single busiest status-day decides the shared Y scale; lines are not
   // stacked, so the axis max is the largest individual count (rounded up, >= 1).
   let maxCount = 1;
   for (const row of counts) {
@@ -90,16 +85,17 @@ export function DailyChart({ data }: { data: DailyBySolution }) {
   // Only label a subset of days on the X axis so labels never overlap.
   const labelStep = Math.ceil(days.length / 12);
 
-  // Lines drawn once per solution. Each carries its polyline points and markers.
-  const lines = solutions.map((s, si) => {
-    const stroke = colorFor(s.color, si);
+  // Lines drawn once per status. Each carries its polyline points and markers.
+  const lines = statuses.map((status, si) => {
+    const stroke = STATUS_LINE_COLOR[status];
+    const name = t(STATUS_META[status].labelKey);
     const points = days.map((day, di) => ({
       day,
       value: counts[di]?.[si] ?? 0,
       cx: xFor(di),
       cy: yFor(counts[di]?.[si] ?? 0),
     }));
-    return { id: s.id, name: s.name, stroke, points };
+    return { id: status, name, stroke, points };
   });
 
   return (
@@ -110,7 +106,7 @@ export function DailyChart({ data }: { data: DailyBySolution }) {
         width="100%"
         className="h-44 w-full"
         role="img"
-        aria-label={`${t("overview.dailyChartTitle")}: ${solutions.length}, ${days.length}`}
+        aria-label={`${t("overview.dailyChartTitle")}: ${statuses.length}, ${days.length}`}
       >
         {/* Optional mid gridline. */}
         {midValue !== null && (
@@ -178,7 +174,7 @@ export function DailyChart({ data }: { data: DailyBySolution }) {
           );
         })}
 
-        {/* One line per solution, sharing the X/Y scale, plus per-point markers. */}
+        {/* One line per status, sharing the X/Y scale, plus per-point markers. */}
         {lines.map((line) => (
           <g key={line.id}>
             <polyline
@@ -199,16 +195,16 @@ export function DailyChart({ data }: { data: DailyBySolution }) {
         ))}
       </svg>
 
-      {/* Legend below the plot: wrapping row of swatch + solution name. */}
+      {/* Legend below the plot: wrapping row of swatch + status label. */}
       <ul className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        {solutions.map((s, i) => (
-          <li key={s.id} className="flex items-center gap-1.5">
+        {statuses.map((status) => (
+          <li key={status} className="flex items-center gap-1.5">
             <span
               aria-hidden="true"
               className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: colorFor(s.color, i) }}
+              style={{ backgroundColor: STATUS_LINE_COLOR[status] }}
             />
-            <span className="text-xs text-fg-muted">{s.name}</span>
+            <span className="text-xs text-fg-muted">{t(STATUS_META[status].labelKey)}</span>
           </li>
         ))}
       </ul>

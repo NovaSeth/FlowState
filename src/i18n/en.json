@@ -87,9 +87,9 @@
     "noActivity": "No activity.",
     "noProjectsInSolution": "No projects in this solution.",
     "recent": "Recently",
-    "dailyChartTitle": "Completed per day",
-    "dailyChartEmpty": "No completed tasks yet. Close a task to see it here.",
-    "dailyChartUnit": "{n} tasks"
+    "dailyChartTitle": "Status changes per day",
+    "dailyChartEmpty": "No status changes yet. Move a task to see it here.",
+    "dailyChartUnit": "{n} changes"
   },
   "explorer": {
     "solutions": "Solutions",

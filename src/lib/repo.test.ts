@@ -1279,79 +1279,83 @@ describe("Repo - completedToday (authoritative TODAY scoreboard)", () => {
   });
 });
 
-describe("Repo - dailyBySolution (live daily chart data)", () => {
-  // Own db, so we can pin completedAt onto specific civil dates per task.
+describe("Repo - dailyByStatus (live daily chart data)", () => {
+  // Own db, so we can pin each status transition onto a specific civil date.
   function repoWithDb(): { repo: Repo; db: DatabaseSync } {
     const db = createDatabase(":memory:");
     return { repo: new Repo(db), db };
   }
 
-  /** Stamp a task's completedAt at midday of a given 'YYYY-MM-DD' so date() lands
-   *  on that civil day regardless of the runner's timezone. */
-  function completeOn(
+  /** Move a task to `toStatus`, then stamp the just-recorded status-transition
+   *  activity row at midday of `day` so date(at) lands on that civil day
+   *  regardless of the runner's timezone. */
+  function transitionOn(
     repo: Repo,
     db: DatabaseSync,
-    milestoneId: string,
-    title: string,
+    taskId: string,
+    toStatus: string,
     day: string,
   ): void {
-    const t = repo.createTask({ milestoneId, title });
-    repo.updateTask(t.id, { status: "done" });
-    db.prepare(`UPDATE tasks SET completedAt = ? WHERE id = ?`).run(`${day}T12:00:00.000Z`, t.id);
+    repo.updateTask(taskId, {
+      status: toStatus as never,
+      ...(toStatus === "blocked" ? { reason: "waiting" } : {}),
+    });
+    db.prepare(
+      `UPDATE activity SET at = ?
+       WHERE id = (SELECT id FROM activity
+                   WHERE entityType = 'task' AND entityId = ? AND action = 'status'
+                   ORDER BY at DESC, rowid DESC LIMIT 1)`,
+    ).run(`${day}T12:00:00.000Z`, taskId);
   }
 
-  it("groups completed tasks by day and by solution into a matrix", () => {
+  it("groups status transitions by day and target status into a matrix", () => {
     const { repo, db } = repoWithDb();
-    // Two solutions, each with its own project/milestone.
-    const sA = repo.createSolution({ name: "Globex", color: "#3fb950" });
-    const pA = repo.createProject({ solutionId: sA.id, name: "Web" });
-    const mA = repo.createMilestone({ projectId: pA.id, title: "M-A" }).id;
-    const sB = repo.createSolution({ name: "Acme", color: "#db61a2" });
-    const pB = repo.createProject({ solutionId: sB.id, name: "App" });
-    const mB = repo.createMilestone({ projectId: pB.id, title: "M-B" }).id;
+    const s = repo.createSolution({ name: "Globex" });
+    const p = repo.createProject({ solutionId: s.id, name: "Web" });
+    const m = repo.createMilestone({ projectId: p.id, title: "M1" }).id;
 
-    // Day 1: 2 in Globex, 1 in Acme. Day 2: 1 in Globex. Day 3: 3 in Acme.
-    completeOn(repo, db, mA, "A1", "2026-05-01");
-    completeOn(repo, db, mA, "A2", "2026-05-01");
-    completeOn(repo, db, mB, "B1", "2026-05-01");
-    completeOn(repo, db, mA, "A3", "2026-05-02");
-    completeOn(repo, db, mB, "B2", "2026-05-03");
-    completeOn(repo, db, mB, "B3", "2026-05-03");
-    completeOn(repo, db, mB, "B4", "2026-05-03");
+    const t1 = repo.createTask({ milestoneId: m, title: "T1" });
+    const t2 = repo.createTask({ milestoneId: m, title: "T2" });
+    const t3 = repo.createTask({ milestoneId: m, title: "T3" });
 
-    const chart = repo.getDashboard().dailyBySolution;
-    expect(chart.days).toEqual(["2026-05-01", "2026-05-02", "2026-05-03"]);
-    // Both solutions appear; the matrix dimensions match days x solutions.
-    expect(chart.solutions.map((s) => s.name).sort()).toEqual(["Acme", "Globex"]);
-    expect(chart.counts.length).toBe(3);
-    expect(chart.counts.every((row) => row.length === chart.solutions.length)).toBe(true);
+    // Day 1: two tasks -> in_progress, one task -> blocked.
+    transitionOn(repo, db, t1.id, "in_progress", "2026-05-01");
+    transitionOn(repo, db, t2.id, "in_progress", "2026-05-01");
+    transitionOn(repo, db, t3.id, "blocked", "2026-05-01");
+    // Day 2: two tasks -> done (from different prior statuses).
+    transitionOn(repo, db, t1.id, "done", "2026-05-02");
+    transitionOn(repo, db, t3.id, "done", "2026-05-02");
 
-    // Verify the per-cell counts via the solution index.
-    const zi = chart.solutions.findIndex((s) => s.name === "Globex");
-    const ai = chart.solutions.findIndex((s) => s.name === "Acme");
-    expect(chart.counts[0][zi]).toBe(2); // 2026-05-01 Globex
-    expect(chart.counts[0][ai]).toBe(1); // 2026-05-01 Acme
-    expect(chart.counts[1][zi]).toBe(1); // 2026-05-02 Globex
-    expect(chart.counts[1][ai]).toBe(0); // 2026-05-02 Acme
-    expect(chart.counts[2][ai]).toBe(3); // 2026-05-03 Acme
+    const chart = repo.getDashboard().dailyByStatus;
+    expect(chart.days).toEqual(["2026-05-01", "2026-05-02"]);
+    // Only statuses with transitions appear, ordered by STATUS_ORDER.
+    expect(chart.statuses).toEqual(["in_progress", "blocked", "done"]);
+    expect(chart.counts.length).toBe(2);
+    expect(chart.counts.every((row) => row.length === chart.statuses.length)).toBe(true);
 
-    // Color is carried through from the solution.
-    expect(chart.solutions[zi].color).toBe("#3fb950");
+    const ip = chart.statuses.indexOf("in_progress");
+    const bl = chart.statuses.indexOf("blocked");
+    const dn = chart.statuses.indexOf("done");
+    expect(chart.counts[0][ip]).toBe(2); // 2026-05-01 in_progress
+    expect(chart.counts[0][bl]).toBe(1); // 2026-05-01 blocked
+    expect(chart.counts[0][dn]).toBe(0); // 2026-05-01 done
+    expect(chart.counts[1][ip]).toBe(0); // 2026-05-02 in_progress
+    expect(chart.counts[1][dn]).toBe(2); // 2026-05-02 done (in_progress->done + blocked->done)
   });
 
-  it("is empty when nothing is completed", () => {
+  it("is empty when no status transitions have happened", () => {
     const { repo } = repoWithDb();
     const s = repo.createSolution({ name: "Globex" });
     const p = repo.createProject({ solutionId: s.id, name: "Web" });
     const m = repo.createMilestone({ projectId: p.id, title: "M1" }).id;
-    repo.createTask({ milestoneId: m, title: "Open" }); // not done -> no completion
-    const chart = repo.getDashboard().dailyBySolution;
+    repo.createTask({ milestoneId: m, title: "Open" }); // creation is not a status transition
+    const chart = repo.getDashboard().dailyByStatus;
     expect(chart.days).toEqual([]);
-    expect(chart.solutions).toEqual([]);
+    expect(chart.statuses).toEqual([]);
     expect(chart.counts).toEqual([]);
   });
 
-  it("a solution-scoped key only sees its own solution's series", () => {
+  it("a solution-scoped key only sees its own solution's transitions", () => {
     const { repo, db } = repoWithDb();
     const sA = repo.createSolution({ name: "Globex" });
     const pA = repo.createProject({ solutionId: sA.id, name: "Web" });
@@ -1360,21 +1364,23 @@ describe("Repo - dailyBySolution (live daily chart data)", () => {
     const pB = repo.createProject({ solutionId: sB.id, name: "App" });
     const mB = repo.createMilestone({ projectId: pB.id, title: "M-B" }).id;
 
-    completeOn(repo, db, mA, "A1", "2026-05-01");
-    completeOn(repo, db, mB, "B1", "2026-05-01");
-    completeOn(repo, db, mB, "B2", "2026-05-02");
+    const a1 = repo.createTask({ milestoneId: mA, title: "A1" });
+    const b1 = repo.createTask({ milestoneId: mB, title: "B1" });
+    transitionOn(repo, db, a1.id, "in_progress", "2026-05-01");
+    transitionOn(repo, db, b1.id, "done", "2026-05-02");
 
-    // Unscoped (admin) sees both solutions.
-    const all = repo.getDashboard().dailyBySolution;
-    expect(all.solutions.map((s) => s.name).sort()).toEqual(["Acme", "Globex"]);
+    // Unscoped (admin) sees both solutions' transitions.
+    const all = repo.getDashboard().dailyByStatus;
+    expect(all.days).toEqual(["2026-05-01", "2026-05-02"]);
+    expect(all.statuses).toEqual(["in_progress", "done"]);
 
-    // A key scoped to solution A sees ONLY A's series and days.
+    // A key scoped to solution A sees ONLY A's transitions and days.
     const scoped = runWithContext(
       { keySolutionId: sA.id, keyScope: "read" },
-      () => repo.getDashboard().dailyBySolution,
+      () => repo.getDashboard().dailyByStatus,
     );
-    expect(scoped.solutions.map((s) => s.name)).toEqual(["Globex"]);
-    expect(scoped.days).toEqual(["2026-05-01"]); // A only completed on day 1
+    expect(scoped.days).toEqual(["2026-05-01"]);
+    expect(scoped.statuses).toEqual(["in_progress"]);
     expect(scoped.counts).toEqual([[1]]);
   });
 });

@@ -40,7 +40,7 @@ export function Overview({ initial }: { initial: DashboardPayload }) {
 
       <section className="space-y-3">
         <Eyebrow>{t("overview.dailyChartTitle")}</Eyebrow>
-        <DailyChart data={d.dailyBySolution} />
+        <DailyChart data={d.dailyByStatus} />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">

@@ -87,9 +87,9 @@
     "noActivity": "Brak aktywnosci.",
     "noProjectsInSolution": "Brak projektow w tej solucji.",
     "recent": "Ostatnio",
-    "dailyChartTitle": "Ukonczone dziennie",
-    "dailyChartEmpty": "Brak ukonczonych zadan. Domknij zadanie, aby zobaczyc je tutaj.",
-    "dailyChartUnit": "{n} zad."
+    "dailyChartTitle": "Zmiany statusow dziennie",
+    "dailyChartEmpty": "Brak zmian statusu. Zmien status zadania, aby zobaczyc je tutaj.",
+    "dailyChartUnit": "{n} zmian"
   },
   "explorer": {
     "solutions": "Solucje",

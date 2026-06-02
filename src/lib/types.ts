@@ -302,17 +302,19 @@ export interface DashboardSolution extends SolutionRollup {
 }
 
 /**
- * Daily completed-task counts broken down by solution - the source of the live
- * stacked bar chart on the overview. Shaped for direct rendering: one column per
- * day, one stacked segment per solution.
- *   counts[dayIndex][solutionIndex] = tasks completed that day in that solution.
- * `days` are 'YYYY-MM-DD' in chronological order; `solutions` carry the name and
- * (possibly empty) color from the dashboard's solutions list. Capped to the most
- * recent days that have completions, so the payload stays bounded.
+ * Daily status-transition counts - the source of the live line chart on the
+ * overview. Each point is "how many tasks ENTERED this status on this day",
+ * read from the activity log (action='status', summary 'old -> new'), aggregated
+ * across all solutions (solution-scoped keys see only their own transitions).
+ *   counts[dayIndex][statusIndex] = transitions into that status that day.
+ * `days` are 'YYYY-MM-DD' in chronological order; `statuses` lists only the
+ * statuses that actually have transitions in the window, ordered by STATUS_ORDER
+ * (the UI owns each status' color/label). Capped to the most recent days that
+ * have transitions, so the payload stays bounded.
  */
-export interface DailyBySolution {
+export interface DailyByStatus {
   days: string[];
-  solutions: { id: string; name: string; color: string }[];
+  statuses: TaskStatus[];
   counts: number[][];
 }
 
@@ -357,8 +359,8 @@ export interface DashboardPayload {
   attention: AttentionTask[];
   /** recently changed tasks - "what's going on" */
   recent: TaskWithContext[];
-  /** Tasks completed per day, broken down by solution (for the live daily chart). */
-  dailyBySolution: DailyBySolution;
+  /** Task status transitions per day (for the live daily chart). */
+  dailyByStatus: DailyByStatus;
 }
 
 /**
