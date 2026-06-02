@@ -85,7 +85,6 @@
     "nothingBlocking": "Nothing blocking. All clear.",
     "recentActivity": "Recent activity",
     "noActivity": "No activity.",
-    "noProjectsInSolution": "No projects in this solution.",
     "recent": "Recently",
     "dailyChartTitle": "Status changes per day",
     "dailyChartEmpty": "No status changes yet. Move a task to see it here.",
