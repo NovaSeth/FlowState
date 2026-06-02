@@ -161,6 +161,27 @@ describe("Repo - tasks and progress", () => {
     expect(cl.progress).toEqual({ total: 2, done: 2, percent: 100 });
   });
 
+  it("project does NOT auto-complete while a sibling milestone (no tasks) is still active", () => {
+    // M1 has tasks, M2 is an empty/active milestone. Completing all of M1's
+    // tasks must NOT close the project - there is still open milestone work.
+    const m2 = repo.createMilestone({ projectId, title: "M2" }).id;
+    const t = repo.createTask({ milestoneId, title: "A" });
+    repo.updateTask(t.id, { status: "done" });
+    // M1 itself rolls up to done...
+    expect(repo.getMilestone(milestoneId)!.status).toBe("done");
+    // ...but M2 is still active, so the project must stay active.
+    expect(repo.getMilestone(m2)!.status).toBe("active");
+    expect(repo.getProject(projectId)!.status).toBe("active");
+  });
+
+  it("project auto-completes once every milestone is done", () => {
+    const m2 = repo.createMilestone({ projectId, title: "M2" }).id;
+    repo.updateTask(repo.createTask({ milestoneId, title: "A" }).id, { status: "done" });
+    expect(repo.getProject(projectId)!.status).toBe("active"); // M2 still open
+    repo.updateTask(repo.createTask({ milestoneId: m2, title: "B" }).id, { status: "done" });
+    expect(repo.getProject(projectId)!.status).toBe("done"); // every milestone done
+  });
+
   it("PATCH status in a single call", () => {
     const t = repo.createTask({ milestoneId, title: "A" });
     const updated = repo.updateTask(t.id, { status: "done" });

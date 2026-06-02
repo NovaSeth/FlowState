@@ -1119,9 +1119,11 @@ export class Repo {
     this.syncContainerStatus(ms?.m); // deleting a task may close the milestone/project
   }
 
-  /** Container auto-status after task changes: a milestone/project with 0 open and
-   *  >=1 'done' gets status 'done'; conversely it returns from 'done' to 'active'.
-   *  paused/archived are LEFT UNTOUCHED (deliberate manual overrides). */
+  /** Container auto-status after task changes. A milestone with 0 open tasks and
+   *  >=1 'done' task gets status 'done' (reopen -> back to 'active'). A project
+   *  rolls up from its milestones' statuses: 'done' only when >=1 milestone is
+   *  done and none is still 'active' (so an empty/active milestone keeps the
+   *  project open). paused/archived are LEFT UNTOUCHED (deliberate manual overrides). */
   private syncContainerStatus(milestoneId: string | null | undefined): void {
     if (!milestoneId) return;
     this.autoStatusFor("milestones", milestoneId, () => {
@@ -1141,12 +1143,17 @@ export class Repo {
     if (proj?.p) {
       const pid = proj.p;
       this.autoStatusFor("projects", pid, () => {
+        // A project is done only when every milestone is done. Count milestone
+        // STATUSES (not raw tasks) so an empty/active milestone with no tasks
+        // keeps the project open - otherwise one finished milestone would close
+        // the project while sibling milestones still hold open work. Milestone
+        // statuses were synced just above, so they are current here.
         const r = this.db
           .prepare(
             `SELECT
-               SUM(CASE WHEN t.status='done' THEN 1 ELSE 0 END) AS d,
-               SUM(CASE WHEN t.status IN (${OPEN_STATUSES}) THEN 1 ELSE 0 END) AS o
-             FROM tasks t JOIN milestones m ON t.milestoneId = m.id WHERE m.projectId = ?`,
+               SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS d,
+               SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS o
+             FROM milestones WHERE projectId = ?`,
           )
           .get(pid) as { d: number | null; o: number | null };
         return { d: r.d ?? 0, o: r.o ?? 0 };
