@@ -29,4 +29,21 @@ describe("keyless API access (no x-api-key)", () => {
     const res = await read(get({ "sec-fetch-site": "cross-site" }), ctx);
     expect(res.status).toBe(401);
   });
+
+  // Plain HTTP over a LAN IP (e.g. the dashboard on a phone) gets no Sec-Fetch-*
+  // headers, so we fall back to a same-origin Origin/Referer check.
+  it("allows a keyless read when Sec-Fetch is absent but the Referer is same-origin", async () => {
+    const res = await read(get({ referer: "http://localhost:3000/explore" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("allows a keyless read with a same-origin Origin header", async () => {
+    const res = await read(get({ origin: "http://localhost:3000" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("denies a keyless read whose Referer is a different origin", async () => {
+    const res = await read(get({ referer: "http://evil.example/" }), ctx);
+    expect(res.status).toBe(401);
+  });
 });
