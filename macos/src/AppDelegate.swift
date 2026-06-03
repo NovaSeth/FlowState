@@ -79,6 +79,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Clicking the app in Launchpad / Finder / Dock while it is already running
+    /// (it autostarts at login, so it usually is) fires this. Without it, a
+    /// menu-bar (accessory) app would just do nothing - confusing. Open or re-focus
+    /// the dashboard window so the icon behaves the way users expect.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openDashboard()
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // The server is our child process; tear it down cleanly on quit. With
         // `--no-server` we do not own it (external dev server), so leave it running.
