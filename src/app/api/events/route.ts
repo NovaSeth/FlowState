@@ -6,7 +6,13 @@ export const dynamic = "force-dynamic";
 /**
  * Server-Sent Events stream. The client (dashboard) opens an EventSource and on
  * every data change receives "data: {...}", then fetches the fresh state.
- * A heartbeat (SSE comment) every 25s keeps the connection alive.
+ *
+ * A heartbeat ("event: ping") every 5s does double duty: it keeps the connection
+ * alive AND gives the client a regular signal to watch. The client treats a gap in
+ * pings as "server offline" - because EventSource.onerror is unreliable (a killed
+ * localhost server can leave the browser's connection looking open for a long time,
+ * so onerror never fires). It is a NAMED event so it does not trigger onmessage
+ * (which is reserved for real data changes -> refetch).
  */
 export async function GET(): Promise<Response> {
   const encoder = new TextEncoder();
@@ -24,7 +30,7 @@ export async function GET(): Promise<Response> {
       };
       send("retry: 3000\n: connected\n\n");
       unsubscribe = subscribeChanges((e) => send(`data: ${JSON.stringify(e)}\n\n`));
-      heartbeat = setInterval(() => send(": hb\n\n"), 25000);
+      heartbeat = setInterval(() => send("event: ping\ndata: 1\n\n"), 5000);
     },
     cancel() {
       clearInterval(heartbeat);

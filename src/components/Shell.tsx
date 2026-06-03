@@ -4,6 +4,7 @@ import { ReactNode } from "react";
 import Link from "next/link";
 import { NavRail, MobileTabBar } from "./NavRail";
 import { Celebrations } from "./Celebrations";
+import { OfflineOverlay } from "./OfflineOverlay";
 import { BrandMark } from "./BrandMark";
 import { Scoreboard } from "./Scoreboard";
 import { useIsNarrow } from "@/lib/use-is-narrow";
@@ -63,6 +64,10 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* Gamification: "+1" fly-to-counter + full-screen "YOU WIN". Global,
           because a completion can happen on any screen. */}
       <Celebrations />
+
+      {/* Server-offline curtain (SSE dropped while the app is open). Global so it
+          covers any screen; auto-hides when EventSource reconnects. */}
+      <OfflineOverlay />
     </div>
   );
 }

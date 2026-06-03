@@ -37,9 +37,50 @@ let currentStatus: ConnStatus = "connecting";
 const messageListeners = new Set<MessageCallback>();
 const statusListeners = new Set<StatusCallback>();
 
+// Heartbeat watchdog + self-healing reconnect. The browser's native EventSource
+// machinery is unreliable on both ends of an outage:
+//  - DETECTION: a killed localhost server can leave the connection looking open,
+//    so onerror never fires (the dot would stay green forever).
+//  - RECOVERY: after a longer outage the native auto-reconnect just gives up, so
+//    when the server comes back the stream never re-opens on its own.
+// So we don't trust it. The server sends "event: ping" every 5s; we track the gap.
+// If nothing arrives for STALE_MS we declare "down" AND tear the stream down and
+// re-open it ourselves, retrying every RECONNECT_MS until a ping/open arrives and
+// flips us back to "live".
+const STALE_MS = 12_000;
+const RECONNECT_MS = 3_000;
+let lastSeen = 0;
+let watchdog: ReturnType<typeof setInterval> | null = null;
+
 function setStatus(status: ConnStatus): void {
+  if (status === currentStatus) return;
   currentStatus = status;
   for (const l of statusListeners) l(status);
+}
+
+/** Mark the stream as alive right now (called on any inbound signal). */
+function markAlive(): void {
+  lastSeen = Date.now();
+  setStatus("live");
+}
+
+/** (Re)create the raw EventSource and wire its handlers. */
+function openStream(): void {
+  if (typeof window === "undefined") return;
+  const source = new EventSource("/api/events");
+  source.onopen = () => markAlive();
+  source.onmessage = () => {
+    markAlive();
+    for (const l of messageListeners) l();
+  };
+  // Heartbeat: keeps lastSeen fresh, but is NOT a data change (no refetch).
+  source.addEventListener("ping", () => {
+    lastSeen = Date.now();
+    setStatus("live");
+  });
+  // Fast path when it fires; the watchdog is the reliable backstop when it doesn't.
+  source.onerror = () => setStatus("down");
+  es = source;
 }
 
 function ensureConnection(): void {
@@ -47,16 +88,19 @@ function ensureConnection(): void {
   // Created only on the client (callers are effects); guard SSR just in case.
   if (typeof window === "undefined") return;
   setStatus("connecting");
-  const source = new EventSource("/api/events");
-  source.onopen = () => setStatus("live");
-  source.onmessage = () => {
-    setStatus("live");
-    for (const l of messageListeners) l();
-  };
-  // EventSource retries on its own; we surface "down" but keep the stream open so
-  // onopen flips us back to "live" once the server is back. We never close here.
-  source.onerror = () => setStatus("down");
-  es = source;
+  lastSeen = Date.now();
+  openStream();
+  if (!watchdog) {
+    watchdog = setInterval(() => {
+      if (Date.now() - lastSeen <= STALE_MS) return;
+      // Stale: the server is gone. Surface it and force a fresh connection
+      // (the native retry can't be trusted to come back). lastSeen stays old, so
+      // we keep retrying every tick until a real signal updates it.
+      setStatus("down");
+      if (es) es.close();
+      openStream();
+    }, RECONNECT_MS);
+  }
 }
 
 function maybeCloseConnection(): void {
@@ -64,6 +108,10 @@ function maybeCloseConnection(): void {
   if (es) {
     es.close();
     es = null;
+  }
+  if (watchdog) {
+    clearInterval(watchdog);
+    watchdog = null;
   }
   // Reset so a future re-subscribe starts from "connecting" again, matching the
   // fresh-EventSource behavior of the old per-hook code.
@@ -118,9 +166,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
 /**
  * Live connection status (SSE /api/events) - for the "server is up" indicator in
- * the UI (the dot in the logo). Reads from the SHARED stream (no second
- * EventSource). onopen/onmessage -> live; onerror -> down; EventSource retries on
- * its own, so once the server is back onopen sets live again.
+ * the UI (the dot in the logo) and the offline overlay. Reads from the SHARED
+ * stream (no second EventSource). Any inbound signal (open/ping/message) -> live;
+ * a heartbeat gap (watchdog) OR onerror -> down. EventSource retries on its own,
+ * so once the server is back its onopen/ping flips us to live again.
  */
 export function useConnectionStatus(): ConnStatus {
   const [status, setStatus] = useState<ConnStatus>("connecting");

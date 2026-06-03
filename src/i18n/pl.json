@@ -12,6 +12,11 @@
     "settings": "Ustawienia",
     "menu": "Menu glowne"
   },
+  "conn": {
+    "offlineTitle": "Serwer offline",
+    "offlineHint": "Utracono połączenie z serwerem Flow State. Łączę ponownie automatycznie, gdy tylko wróci...",
+    "reconnecting": "Łączę ponownie"
+  },
   "common": {
     "back": "Wstecz",
     "confirm": "Na pewno?",
