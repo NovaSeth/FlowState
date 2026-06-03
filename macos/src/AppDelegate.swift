@@ -65,7 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.checkPulse()
         }
         // Bring the server up on launch (i.e. at login) unless it already runs.
-        startServerIfNeeded()
+        // `--no-server` skips this: the app then drives an externally-managed server
+        // (e.g. `npm run dev` in a terminal) instead of owning the child process.
+        if !CommandLine.arguments.contains("--no-server") {
+            startServerIfNeeded()
+        }
 
         // Optional: open straight to the dashboard window on launch (for a
         // Spotlight/Dock launcher, or testing). Normal login launch stays menu-bar
@@ -76,8 +80,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // The server is our child process; tear it down cleanly on quit.
-        controller.stop()
+        // The server is our child process; tear it down cleanly on quit. With
+        // `--no-server` we do not own it (external dev server), so leave it running.
+        if !CommandLine.arguments.contains("--no-server") {
+            controller.stop()
+        }
     }
 
     // MARK: - menu
