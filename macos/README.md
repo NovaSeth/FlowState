@@ -27,11 +27,20 @@ Look for the **wave icon** in your menu bar. A small dot shows the state:
 
 ## Menu
 
-- **Open Dashboard** - opens http://localhost:3000
+- **Open Dashboard** - opens the dashboard in a native window (a thin `WKWebView`
+  hosting the web UI). The window shows a branded "Starting / Server offline" splash
+  if the server is not serving yet, then loads automatically once it is up - so you
+  never see the browser's `ERR_CONNECTION_REFUSED`. The Dock icon (the Flow wave)
+  appears while the window is open and goes away when you close it.
+- **Open in Browser** - opens http://localhost:3000 in your default browser (handy
+  for DevTools or sharing the LAN URL). Enabled only while the server is serving.
 - **Start / Stop / Restart** - control the server (enabled per current state)
 - **View Logs** - opens `~/Library/Logs/FlowState/server.log`
 - **Open at Login** - toggle autostart (the app's login-item registration)
 - **Quit Flow State (stops server)** - quits the app and stops the server
+
+> Tip: launch with `--open-dashboard` (e.g. a Spotlight/Dock launcher) to open
+> straight to the dashboard window. A normal login launch stays menu-bar only.
 
 ## Uninstall
 
@@ -66,7 +75,9 @@ Repo path, node bin and port are baked into the app's `Info.plist` at build time
 | `src/main.swift` | NSApplication bootstrap (accessory / no Dock icon) |
 | `src/AppDelegate.swift` | status item, menu, polling, transitions, login item |
 | `src/ServerController.swift` | spawns/stops the server child, HTTP probe |
-| `src/FlowIcon.swift` | the programmatic "Flow" wave icon |
+| `src/DashboardWindow.swift` | native WKWebView window + "reconnect" splash |
+| `src/FlowIcon.swift` | the programmatic "Flow" wave (menu-bar icon + splash mark) |
+| `src/IconExport.swift` | build-time app-icon (`.icns`) generator from the wave |
 | `build.sh` | compiles `FlowState.app` with `swiftc` (no Xcode project) |
 | `install.sh` / `uninstall.sh` | install / remove app + autostart |
 

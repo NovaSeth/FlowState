@@ -5,6 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = ServerController()
     private var statusItem: NSStatusItem!
     private var controlServer: ControlServer?
+    /// Lazily created on first "Open Dashboard"; reused across opens.
+    private var dashboardWindow: DashboardWindowController?
 
     private var state: ServerState = .unknown {
         didSet { if oldValue != state { renderState() } }
@@ -64,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Bring the server up on launch (i.e. at login) unless it already runs.
         startServerIfNeeded()
+
+        // Optional: open straight to the dashboard window on launch (for a
+        // Spotlight/Dock launcher, or testing). Normal login launch stays menu-bar
+        // only (no window) per the autostart design.
+        if CommandLine.arguments.contains("--open-dashboard") {
+            openDashboard()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -130,6 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // --- app-level --------------------------------------------------------
         menu.addItem(.separator())
+        // Browser path stays available (DevTools / sharing the LAN URL); only
+        // meaningful while the server actually serves.
+        menu.addItem(item("Open in Browser", #selector(openInBrowser), enabled: ds == .running))
         menu.addItem(item("View Logs", #selector(viewLogs), enabled: true))
 
         let login = item("Launch at Login", #selector(toggleOpenAtLogin), enabled: true)
@@ -189,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.image = FlowIcon.image(for: ds)
         statusItem.button?.toolTip = "Flow State - \(ds.label)"
         controlServer?.updateStatus(token(ds))   // web Settings reads this state
+        dashboardWindow?.serverStateChanged(ds)   // native window: copy + auto-reload
         // The menu rebuilds itself from current state/stats on open
         // (menuNeedsUpdate), so there is nothing else to do here.
     }
@@ -242,7 +255,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - actions
 
-    @objc private func openDashboard() { NSWorkspace.shared.open(controller.dashboardURL) }
+    /// Open the native dashboard window (default). Shows the Dock icon while it is
+    /// up; the window itself shows a branded splash if the server is not yet serving.
+    @objc private func openDashboard() {
+        if dashboardWindow == nil {
+            let w = DashboardWindowController(controller: controller)
+            w.onWindowClose = {
+                // Drop the Dock icon; stay a menu-bar accessory.
+                NSApp.setActivationPolicy(.accessory)
+            }
+            dashboardWindow = w
+        }
+        NSApp.setActivationPolicy(.regular)
+        dashboardWindow?.serverStateChanged(displayState())
+        dashboardWindow?.show()
+    }
+
+    /// Secondary path: open the dashboard in the default browser (DevTools, sharing
+    /// the LAN URL). Disabled when the server is not serving.
+    @objc private func openInBrowser() { NSWorkspace.shared.open(controller.dashboardURL) }
 
     @objc private func viewLogs() {
         NSWorkspace.shared.open(URL(fileURLWithPath: controller.logPath))

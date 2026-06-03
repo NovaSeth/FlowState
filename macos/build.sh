@@ -10,7 +10,7 @@ MACOS_DIR="$APP/Contents/MacOS"
 RES_DIR="$APP/Contents/Resources"
 BIN="$MACOS_DIR/FlowState"
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 ARCH="$(uname -m)"          # arm64 or x86_64
 MIN_MACOS="13.0"
 
@@ -34,6 +34,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key>     <string>Flow State</string>
     <key>CFBundleIdentifier</key>      <string>com.flowstate.menubar</string>
     <key>CFBundleExecutable</key>      <string>FlowState</string>
+    <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
     <key>CFBundleVersion</key>         <string>${VERSION}</string>
@@ -58,10 +59,22 @@ swiftc \
     -framework AppKit \
     -framework ServiceManagement \
     -framework Network \
+    -framework WebKit \
     -o "$BIN" \
-    src/main.swift src/AppDelegate.swift src/ServerController.swift src/FlowIcon.swift src/ControlServer.swift
+    src/main.swift src/AppDelegate.swift src/ServerController.swift src/FlowIcon.swift src/ControlServer.swift src/DashboardWindow.swift src/IconExport.swift
 
 chmod +x "$BIN"
+
+echo "[build] generating app icon (AppIcon.icns) from the Flow wave"
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+"$BIN" --export-iconset "$ICONSET"
+if command -v iconutil >/dev/null 2>&1 && [ -f "$ICONSET/icon_512x512.png" ]; then
+    iconutil -c icns -o "$RES_DIR/AppIcon.icns" "$ICONSET"
+    echo "[build] wrote $RES_DIR/AppIcon.icns"
+else
+    echo "[build] (icon generation skipped - iconutil missing or export failed)"
+fi
+rm -rf "$(dirname "$ICONSET")"
 
 # Ad-hoc sign so the bundle has a stable identity (needed for SMAppService /
 # login-item registration). Harmless if codesign is unavailable.
