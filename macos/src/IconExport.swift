@@ -43,13 +43,16 @@ enum IconExport {
             let radius = tile.width * 0.2237
             let path = NSBezierPath(roundedRect: tile, xRadius: radius, yRadius: radius)
 
-            // Dark canvas gradient (matches the dashboard background).
-            let top = NSColor(srgbRed: 22.0/255, green: 27.0/255, blue: 34.0/255, alpha: 1)
-            let bottom = NSColor(srgbRed: 13.0/255, green: 17.0/255, blue: 23.0/255, alpha: 1)
+            // Brand blue gradient (Primer #0969da, the Flow State accent). Makes the
+            // Dock/Launchpad app icon read completely differently from the thin
+            // monochrome wave in the menu bar, so the two surfaces are easy to tell
+            // apart at a glance.
+            let top = NSColor(srgbRed: 47.0/255, green: 129.0/255, blue: 247.0/255, alpha: 1)   // #2f81f7
+            let bottom = NSColor(srgbRed: 9.0/255, green: 105.0/255, blue: 218.0/255, alpha: 1)  // #0969da
             path.addClip()
             NSGradient(starting: top, ending: bottom)?.draw(in: tile, angle: -90)
-            // Hairline edge so the tile reads on dark wallpapers too.
-            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.06).setStroke()
+            // Hairline edge for definition on light wallpapers.
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.12).setStroke()
             path.lineWidth = max(1, s * 0.004)
             path.stroke()
 
