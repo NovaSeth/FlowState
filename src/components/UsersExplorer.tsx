@@ -131,6 +131,15 @@ export function UsersExplorer({
       const a = await api.createActor({ name, kind });
       await loadActors();
       await selectActor(a.id);
+      // An agent with no key is useless and a footgun: a session would then
+      // grab some other key and silently authenticate as the wrong actor. Mint
+      // a write key right away and surface the token, so an agent is never left
+      // keyless. Humans act through the UI and need no key.
+      if (kind === "agent") {
+        const created = await api.createApiKey({ actorId: a.id, scope: "write" });
+        setJustCreated(created);
+        await loadKeys();
+      }
     } catch (e) {
       setError(errMessage(e, t("users.createKeyError")));
     }
