@@ -64,14 +64,8 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
   }
 
   // The single busiest status-day decides the shared Y scale; lines are not
-  // stacked, so the axis max is the largest individual count (rounded up, >= 1).
-  let maxCount = 1;
-  for (const row of counts) {
-    for (const n of row) {
-      if (n > maxCount) maxCount = n;
-    }
-  }
-  const yMax = maxCount;
+  // stacked, so the axis max is the largest individual count (clamped to >= 1).
+  const yMax = Math.max(1, ...counts.flat());
 
   // Map a day index to its X center, and a count to its Y. With a single day the
   // point sits in the middle; otherwise points spread evenly across the plot.
@@ -89,12 +83,10 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
   const lines = statuses.map((status, si) => {
     const stroke = STATUS_LINE_COLOR[status];
     const name = t(STATUS_META[status].labelKey);
-    const points = days.map((day, di) => ({
-      day,
-      value: counts[di]?.[si] ?? 0,
-      cx: xFor(di),
-      cy: yFor(counts[di]?.[si] ?? 0),
-    }));
+    const points = days.map((day, di) => {
+      const value = counts[di]?.[si] ?? 0;
+      return { day, value, cx: xFor(di), cy: yFor(value) };
+    });
     return { id: status, name, stroke, points };
   });
 

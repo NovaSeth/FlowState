@@ -84,7 +84,8 @@ export function WinOverlay({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(w, h);
 
-    const N = tier === "solution" ? 320 : tier === "project" ? 220 : 150;
+    // Confetti count per tier (WinTier is only project | solution).
+    const N = tier === "solution" ? 320 : 220;
     const geo = new THREE.PlaneGeometry(0.3, 0.42);
     const top = 11;
     const spreadX = 22;

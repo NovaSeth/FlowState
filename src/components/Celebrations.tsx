@@ -180,18 +180,15 @@ export function Celebrations() {
 
       const freshProjects = newIds(doneProj.current, ci.projects);
       doneProj.current = new Set(ci.projects);
-      for (let i = 0; i < freshProjects.length; i++) {
-        setWins((q) => [
-          ...q,
-          { id: ++winSeq.current, tier: "project" },
-        ]);
-      }
-
       const freshSolutions = newIds(doneSol.current, ci.solutions);
       doneSol.current = new Set(ci.solutions);
-      for (let i = 0; i < freshSolutions.length; i++) {
-        setWins((q) => [...q, { id: ++winSeq.current, tier: "solution" }]);
-      }
+
+      // Queue a full-screen "YOU WIN" per freshly completed project/solution.
+      const newWins: WinItem[] = [
+        ...freshProjects.map(() => ({ id: ++winSeq.current, tier: "project" as const })),
+        ...freshSolutions.map(() => ({ id: ++winSeq.current, tier: "solution" as const })),
+      ];
+      if (newWins.length > 0) setWins((q) => [...q, ...newWins]);
     } catch {
       // transient error (e.g. UI rebuild) - the next SSE will try again
     }

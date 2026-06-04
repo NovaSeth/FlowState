@@ -1498,10 +1498,7 @@ export class Repo {
       params.push(filter.actorId);
     }
     const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const limit = Math.min(
-      Math.max(Number.isFinite(filter.limit) ? (filter.limit as number) : 50, 1),
-      200,
-    );
+    const limit = clampLimit(filter.limit, 50, 200);
     return (
       this.db
         .prepare(`SELECT * FROM activity ${clause} ORDER BY at DESC LIMIT ?`)
@@ -2103,30 +2100,30 @@ export class Repo {
           [scoped],
         )
       : this.statusCountsWhere("", []);
+    // Pick the scoped (solution-filtered) or global COUNT query and run it with the
+    // right params, so each total below is a single expression instead of a ternary.
+    const total = (scopedSql: string, globalSql: string) =>
+      scoped ? this.scalar(scopedSql, [scoped]) : this.scalar(globalSql);
     const totals = {
-      solutions: scoped
-        ? this.scalar(`SELECT COUNT(*) AS n FROM solutions WHERE id = ?`, [scoped])
-        : this.scalar(`SELECT COUNT(*) AS n FROM solutions`),
-      projects: scoped
-        ? this.scalar(`SELECT COUNT(*) AS n FROM projects WHERE solutionId = ?`, [
-            scoped,
-          ])
-        : this.scalar(`SELECT COUNT(*) AS n FROM projects`),
-      milestones: scoped
-        ? this.scalar(
-            `SELECT COUNT(*) AS n FROM milestones m
-             JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
-            [scoped],
-          )
-        : this.scalar(`SELECT COUNT(*) AS n FROM milestones`),
-      tasks: scoped
-        ? this.scalar(
-            `SELECT COUNT(*) AS n FROM tasks t
-             JOIN milestones m ON t.milestoneId = m.id
-             JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
-            [scoped],
-          )
-        : this.scalar(`SELECT COUNT(*) AS n FROM tasks`),
+      solutions: total(
+        `SELECT COUNT(*) AS n FROM solutions WHERE id = ?`,
+        `SELECT COUNT(*) AS n FROM solutions`,
+      ),
+      projects: total(
+        `SELECT COUNT(*) AS n FROM projects WHERE solutionId = ?`,
+        `SELECT COUNT(*) AS n FROM projects`,
+      ),
+      milestones: total(
+        `SELECT COUNT(*) AS n FROM milestones m
+         JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
+        `SELECT COUNT(*) AS n FROM milestones`,
+      ),
+      tasks: total(
+        `SELECT COUNT(*) AS n FROM tasks t
+         JOIN milestones m ON t.milestoneId = m.id
+         JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
+        `SELECT COUNT(*) AS n FROM tasks`,
+      ),
     };
 
     return {

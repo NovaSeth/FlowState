@@ -149,6 +149,8 @@ const TASK_CREATE_KEYS = [
   "artifacts",
 ];
 const MILESTONE_PATCH_KEYS = ["title", "description", "status", "position", "outcome"];
+const SOLUTION_PATCH_KEYS = ["name", "description", "color", "status"];
+const PROJECT_PATCH_KEYS = ["name", "description", "status"];
 
 /** Builds a patch object from `src` limited to `keys` (skips undefined). */
 function pickPatch(src, keys) {
@@ -421,28 +423,12 @@ const TOOLS = [
       },
     },
     run: (a) => {
+      // Allowlist both the bulk elements and the single argument object through
+      // the same TASK_CREATE_KEYS guard, so server-trusted/unknown fields cannot
+      // be mass-assigned on creation.
       const body = Array.isArray(a.tasks)
-        ? // Allowlist each bulk element (as the single path does below) - so
-          // server-trusted/unknown fields cannot be mass-assigned.
-          a.tasks.map((t) => pickPatch(t, TASK_CREATE_KEYS))
-        : pickPatch(
-            {
-              milestoneId: a.milestoneId,
-              title: a.title,
-              description: a.description,
-              status: a.status,
-              priority: a.priority,
-              clientRequestId: a.clientRequestId,
-              parentTaskId: a.parentTaskId,
-              blockedBy: a.blockedBy,
-              relatedTo: a.relatedTo,
-              labels: a.labels,
-              verified: a.verified,
-              blockerType: a.blockerType,
-              artifacts: a.artifacts,
-            },
-            TASK_CREATE_KEYS,
-          );
+        ? a.tasks.map((t) => pickPatch(t, TASK_CREATE_KEYS))
+        : pickPatch(a, TASK_CREATE_KEYS);
       return fsFetch("/api/tasks", {
         method: "POST",
         body: JSON.stringify(body),
@@ -548,12 +534,9 @@ const TOOLS = [
     },
     run: (a) => {
       if (!a.solutionId) throw new Error("solutionId is required");
-      const body = {};
-      for (const k of ["name", "description", "color", "status"])
-        if (a[k] !== undefined) body[k] = a[k];
       return fsFetch(`/api/solutions/${encodeURIComponent(a.solutionId)}`, {
         method: "PATCH",
-        body: JSON.stringify(body),
+        body: JSON.stringify(pickPatch(a, SOLUTION_PATCH_KEYS)),
       });
     },
   },
@@ -573,12 +556,9 @@ const TOOLS = [
     },
     run: (a) => {
       if (!a.projectId) throw new Error("projectId is required");
-      const body = {};
-      for (const k of ["name", "description", "status"])
-        if (a[k] !== undefined) body[k] = a[k];
       return fsFetch(`/api/projects/${encodeURIComponent(a.projectId)}`, {
         method: "PATCH",
-        body: JSON.stringify(body),
+        body: JSON.stringify(pickPatch(a, PROJECT_PATCH_KEYS)),
       });
     },
   },

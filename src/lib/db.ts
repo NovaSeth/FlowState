@@ -182,22 +182,29 @@ CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity(entityId);
 CREATE INDEX IF NOT EXISTS idx_activity_solution ON activity(solutionId);
 `;
 
+/** True when `table` has a column named `column` (reads PRAGMA table_info live). */
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  return cols.some((c) => c.name === column);
+}
+
 /** Additive migrations for existing databases (SQLite has no ADD COLUMN IF NOT EXISTS). */
 function migrate(db: DatabaseSync): void {
-  const cols = db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[];
-  if (!cols.some((c) => c.name === "ownerActorId")) {
+  if (!hasColumn(db, "tasks", "ownerActorId")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN ownerActorId TEXT`);
   }
-  if (!cols.some((c) => c.name === "parentTaskId")) {
+  if (!hasColumn(db, "tasks", "parentTaskId")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN parentTaskId TEXT`);
   }
   // The parentTaskId index is created here (after the column is guaranteed to
   // exist) - in SCHEMA it would fail on an existing database that lacks the column yet.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parentTaskId)`);
-  if (!cols.some((c) => c.name === "verified")) {
+  if (!hasColumn(db, "tasks", "verified")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN verified INTEGER NOT NULL DEFAULT 0`);
   }
-  if (!cols.some((c) => c.name === "blockerType")) {
+  if (!hasColumn(db, "tasks", "blockerType")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN blockerType TEXT`);
   }
   // completedAt: timestamp of entering the 'done' status (for "TODAY" in the
@@ -205,7 +212,7 @@ function migrate(db: DatabaseSync): void {
   // already exists and IF NOT EXISTS skips CREATE TABLE - the column would be
   // missing. Backfill: existing 'done' rows without completedAt get updatedAt (the
   // best available approximation).
-  if (!cols.some((c) => c.name === "completedAt")) {
+  if (!hasColumn(db, "tasks", "completedAt")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN completedAt TEXT`);
     db.exec(
       `UPDATE tasks SET completedAt = updatedAt WHERE status = 'done' AND completedAt IS NULL`,
@@ -215,10 +222,7 @@ function migrate(db: DatabaseSync): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completedAt)`);
 
   // outcome on milestones (deliverable outcome, independent of task %).
-  const msOutcomeCols = db
-    .prepare(`PRAGMA table_info(milestones)`)
-    .all() as { name: string }[];
-  if (!msOutcomeCols.some((c) => c.name === "outcome")) {
+  if (!hasColumn(db, "milestones", "outcome")) {
     db.exec(`ALTER TABLE milestones ADD COLUMN outcome TEXT`);
   }
 
@@ -244,18 +248,12 @@ function migrate(db: DatabaseSync): void {
   `);
 
   // status on solutions and milestones (active|archived / project lifecycle).
-  const solCols = db
-    .prepare(`PRAGMA table_info(solutions)`)
-    .all() as { name: string }[];
-  if (!solCols.some((c) => c.name === "status")) {
+  if (!hasColumn(db, "solutions", "status")) {
     db.exec(
       `ALTER TABLE solutions ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
     );
   }
-  const msCols = db
-    .prepare(`PRAGMA table_info(milestones)`)
-    .all() as { name: string }[];
-  if (!msCols.some((c) => c.name === "status")) {
+  if (!hasColumn(db, "milestones", "status")) {
     db.exec(
       `ALTER TABLE milestones ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
     );

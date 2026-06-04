@@ -25,12 +25,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const narrow = useIsNarrow();
   const t = useT();
   const conn = useConnectionStatus();
-  const dotColor =
-    conn === "live"
-      ? "var(--color-success)"
-      : conn === "connecting"
-        ? "var(--color-accent)"
-        : "var(--color-danger)";
+  const dotColor = {
+    live: "var(--color-success)",
+    connecting: "var(--color-accent)",
+    down: "var(--color-danger)",
+  }[conn];
   // Desktop: left rail (full height, all the way up) | [header + content].
   // Mobile: header + content + bottom tab-bar (rail hidden).
   return (

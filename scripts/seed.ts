@@ -67,7 +67,7 @@ type SolutionSeed = {
 // --- Sample data - theme: tracking multiple Claude Code projects. ---
 const DATA: SolutionSeed[] = [
   {
-    name: "Anthropic Internal",
+    name: "Acme Internal",
     description: "Internal team tools and experiments.",
     color: "#7C3AED",
     projects: [
@@ -101,7 +101,7 @@ const DATA: SolutionSeed[] = [
             priority: "medium",
             milestone: "MVP",
             comments: [
-              { author: "michal", body: "Add a test for cascading delete too." },
+              { author: "alex", body: "Add a test for cascading delete too." },
             ],
           },
           {
@@ -228,7 +228,7 @@ const DATA: SolutionSeed[] = [
             priority: "urgent",
             milestone: "Stabilization",
             comments: [
-              { author: "michal", body: "Blocked until the client approves the contract." },
+              { author: "alex", body: "Blocked until the client approves the contract." },
             ],
           },
           {
@@ -312,7 +312,7 @@ const DATA: SolutionSeed[] = [
             priority: "high",
             milestone: "Release 1.0",
             comments: [
-              { author: "michal", body: "Released, tag 1.0.0 on npm." },
+              { author: "alex", body: "Released, tag 1.0.0 on npm." },
             ],
           },
           {

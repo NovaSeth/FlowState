@@ -47,9 +47,9 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-const post = (url: string, body: unknown) =>
+const post = (body: unknown) =>
   ({ method: "POST", body: JSON.stringify(body) }) satisfies RequestInit;
-const patch = (url: string, body: unknown) =>
+const patch = (body: unknown) =>
   ({ method: "PATCH", body: JSON.stringify(body) }) satisfies RequestInit;
 const del = { method: "DELETE" } satisfies RequestInit;
 
@@ -78,43 +78,43 @@ export const api = {
     req<TaskListItem[]>(`/api/tasks?${qs({ milestoneId })}`),
 
   createSolution: (b: CreateSolutionInput) =>
-    req<Solution>("/api/solutions", post("", b)),
+    req<Solution>("/api/solutions", post(b)),
   updateSolution: (id: string, b: UpdateSolutionInput) =>
-    req<Solution>(`/api/solutions/${id}`, patch("", b)),
+    req<Solution>(`/api/solutions/${id}`, patch(b)),
   deleteSolution: (id: string) => req<void>(`/api/solutions/${id}`, del),
 
   createProject: (b: CreateProjectInput) =>
-    req<Project>("/api/projects", post("", b)),
+    req<Project>("/api/projects", post(b)),
   updateProject: (id: string, b: UpdateProjectInput) =>
-    req<Project>(`/api/projects/${id}`, patch("", b)),
+    req<Project>(`/api/projects/${id}`, patch(b)),
   deleteProject: (id: string) => req<void>(`/api/projects/${id}`, del),
 
   createMilestone: (b: CreateMilestoneInput) =>
-    req<Milestone>("/api/milestones", post("", b)),
+    req<Milestone>("/api/milestones", post(b)),
   updateMilestone: (id: string, b: UpdateMilestoneInput) =>
-    req<Milestone>(`/api/milestones/${id}`, patch("", b)),
+    req<Milestone>(`/api/milestones/${id}`, patch(b)),
   deleteMilestone: (id: string) => req<void>(`/api/milestones/${id}`, del),
 
   getTaskDetail: (id: string) => req<TaskDetail>(`/api/tasks/${id}`),
-  createTask: (b: CreateTaskInput) => req<Task>("/api/tasks", post("", b)),
+  createTask: (b: CreateTaskInput) => req<Task>("/api/tasks", post(b)),
   updateTask: (id: string, b: UpdateTaskInput) =>
-    req<Task>(`/api/tasks/${id}`, patch("", b)),
+    req<Task>(`/api/tasks/${id}`, patch(b)),
   deleteTask: (id: string) => req<void>(`/api/tasks/${id}`, del),
 
   listComments: (taskId: string) =>
     req<Comment[]>(`/api/tasks/${taskId}/comments`),
   createComment: (taskId: string, b: CreateCommentInput) =>
-    req<Comment>(`/api/tasks/${taskId}/comments`, post("", b)),
+    req<Comment>(`/api/tasks/${taskId}/comments`, post(b)),
 
   // identity, keys, audit (Stream C)
   listActors: () => req<Actor[]>("/api/actors"),
-  createActor: (b: CreateActorInput) => req<Actor>("/api/actors", post("", b)),
+  createActor: (b: CreateActorInput) => req<Actor>("/api/actors", post(b)),
   listApiKeys: (filter: { actorId?: string; solutionId?: string } = {}) =>
     req<ApiKey[]>(
       `/api/keys${Object.keys(filter).length ? `?${qs(filter as Record<string, string>)}` : ""}`,
     ),
   createApiKey: (b: CreateApiKeyInput) =>
-    req<ApiKeyWithSecret>("/api/keys", post("", b)),
+    req<ApiKeyWithSecret>("/api/keys", post(b)),
   revokeApiKey: (id: string) => req<ApiKey>(`/api/keys/${id}`, del),
   listActivity: (
     filter: {

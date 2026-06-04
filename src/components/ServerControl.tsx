@@ -82,11 +82,9 @@ export function ServerControl() {
   const dot =
     state === "running"
       ? "bg-success"
-      : state === "stopped" || state === "unreachable"
-        ? "bg-fg-subtle"
-        : state === "starting" || state === "stopping"
-          ? "bg-accent"
-          : "bg-fg-subtle";
+      : state === "starting" || state === "stopping"
+        ? "bg-accent"
+        : "bg-fg-subtle";
 
   return (
     <div className="px-3 py-3">

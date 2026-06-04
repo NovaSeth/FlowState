@@ -29,6 +29,11 @@ import type {
 
 type KeyTab = "details" | "activity";
 
+// A key is expired once its expiry timestamp is in the past (ISO strings compare
+// lexicographically in chronological order).
+const isExpired = (apiKey: ApiKey) =>
+  !!apiKey.expiresAt && apiKey.expiresAt <= new Date().toISOString();
+
 /**
  * Cascading users explorer (Miller columns): Actors -> Keys / actor activity ->
  * Details / key activity. A mirror of Explorer.tsx, but for identities (who acts
@@ -508,7 +513,7 @@ function KeyRow({
   onRevoke: () => void;
 }) {
   const t = useT();
-  const expired = !!apiKey.expiresAt && apiKey.expiresAt <= new Date().toISOString();
+  const expired = isExpired(apiKey);
   return (
     <button
       onClick={onSelect}
@@ -576,7 +581,7 @@ function KeyDetails({
 }) {
   const t = useT();
   if (!apiKey) return <ColHint text={t("users.pickKey")} />;
-  const expired = !!apiKey.expiresAt && apiKey.expiresAt <= new Date().toISOString();
+  const expired = isExpired(apiKey);
   const rows: { label: string; value: ReactNode }[] = [
     {
       label: t("users.keyPrefix"),

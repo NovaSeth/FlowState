@@ -74,10 +74,7 @@ function openStream(): void {
     for (const l of messageListeners) l();
   };
   // Heartbeat: keeps lastSeen fresh, but is NOT a data change (no refetch).
-  source.addEventListener("ping", () => {
-    lastSeen = Date.now();
-    setStatus("live");
-  });
+  source.addEventListener("ping", () => markAlive());
   // Fast path when it fires; the watchdog is the reliable backstop when it doesn't.
   source.onerror = () => setStatus("down");
   es = source;

@@ -71,6 +71,11 @@ const byPriority = (a: TaskListItem, b: TaskListItem) =>
 const byStatusThenPriority = (a: TaskListItem, b: TaskListItem) =>
   STATUS_RANK[a.status] - STATUS_RANK[b.status] || byPriority(a, b);
 
+// FLIP signature for a task list: one segment per task capturing exactly the keys
+// that should drive a re-sort / re-layout (id + status + priority).
+const flipSignature = (tasks: TaskListItem[]) =>
+  tasks.map((t) => `${t.id}:${t.status}:${t.priority}`).join("|");
+
 /**
  * Cascading explorer (Miller columns): Solutions -> Projects -> Milestones ->
  * Tasks -> detail panel. Each level is fetched on demand via the REST API.
@@ -107,9 +112,7 @@ export function Explorer({
 
   // FLIP for the task list: animate the resort when status/priority/composition changes.
   const listRef = useRef<HTMLDivElement>(null);
-  const taskSignal = visibleTasks
-    .map((t) => `${t.id}:${t.status}:${t.priority}`)
-    .join("|");
+  const taskSignal = flipSignature(visibleTasks);
   useFlip(listRef, taskSignal, "slide", msId ?? "");
 
   // Sort the list view once per real change (composition / status / priority),
@@ -629,7 +632,7 @@ function KanbanBoard({
   // FLIP at the level of the WHOLE board - a card slides between columns when its
   // status changes (instead of disappearing and reappearing instantly in another column).
   const boardRef = useRef<HTMLDivElement>(null);
-  const sig = tasks.map((k) => `${k.id}:${k.status}:${k.priority}`).join("|");
+  const sig = flipSignature(tasks);
   useFlip(boardRef, sig, "kanban", resetKey);
 
   // Partition tasks into status columns (each sorted) once per real change, not on

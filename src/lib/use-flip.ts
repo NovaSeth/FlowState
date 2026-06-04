@@ -127,8 +127,7 @@ function kanbanMove(el: HTMLElement, old: DOMRect, scratch: FlipScratch): void {
     })
     .then(() => {
       if (scratch.cancelled) return;
-      clone.remove();
-      el.style.opacity = "";
+      cleanup();
       // the real card enters FROM THE TOP + a fading flash
       scratch.anims.push(
         el.animate(
