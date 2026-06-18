@@ -8,7 +8,8 @@ import { useT } from "@/i18n/provider";
 // UI version. Scheme vMAJOR.MINOR: MINOR grows +1 with EVERY commit
 // (1.01, 1.02, ...), MAJOR jumps when we turn the concept upside down
 // (-> 2.00). Bump it on every commit that touches the UI.
-const UI_VERSION = "1.28";
+// Shared with the native macOS app (CFBundleShortVersionString in macos/build.sh).
+const UI_VERSION = "1.34";
 
 // Main menu (sidebar). Order from the top: Overview, Explorer, Users, Settings.
 // labelKey is resolved through i18n at render time (not a literal, so it stays multilingual).

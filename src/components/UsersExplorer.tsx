@@ -377,7 +377,11 @@ export function UsersExplorer({
     <div className="flex h-full min-h-0 flex-col">
       {banner}
       <div className="flex min-h-0 flex-1 overflow-x-auto">
-        <Column title={t("users.actors")} count={actors.length}>
+        <Column
+          title={t("users.actors")}
+          count={actors.length}
+          collapseId="users.actors"
+        >
           {actorsCol}
         </Column>
 

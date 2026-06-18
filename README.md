@@ -5,6 +5,10 @@ scattered markdown (TODO.md, roadmaps) that drift out of date, Flow State keeps
 the *current* state of work in one place that both people and Claude Code agents
 read and write live.
 
+Use it three ways, all backed by one local server: a live **web dashboard**, a
+**native macOS menu-bar app** (SwiftUI, 1:1 with the web UI), and straight from
+**Claude Code** via the `fs_` MCP tools.
+
 ## Screenshots
 
 ![Flow State dashboard](docs/screenshot-dashboard.png)
@@ -26,19 +30,36 @@ orchestrator captures one). -->
 - **Local-first:** data lives in a local SQLite file via `node:sqlite`
   (synchronous). No external services required.
 
-## Setup
+## Get started
+
+**Requirements:** [Node](https://nodejs.org) **24+** (the store uses `node:sqlite`,
+which is stable in Node 24) and **git**. On Node 22.12-23 it still works, but you
+must enable the SQLite module with a flag (see the note below).
 
 ```bash
+# 1. Get the source from GitHub
+git clone https://github.com/NovaSeth/FlowState.git
+cd FlowState
+
+# 2. Install dependencies
 npm install
-npm run dev      # development server on http://localhost:3000
+
+# 3. Run it (the database data/fs.db is created automatically on first run)
+npm run dev                       # dev server at http://localhost:3000
 ```
 
-For phones, serve a production build (the dev server may not hydrate on iOS
-Safari):
+Then open <http://localhost:3000>. Want demo data to look around? Run
+`npm run seed` first.
+
+For phones / LAN (the dev server may not hydrate on iOS Safari) serve a
+production build instead:
 
 ```bash
 npm run build && npm run start
 ```
+
+> **On Node 22.12-23**, prefix the run commands so `node:sqlite` is enabled, e.g.
+> `NODE_OPTIONS=--experimental-sqlite npm run dev` (Node 24+ needs no flag).
 
 ### Environment
 
@@ -70,11 +91,21 @@ cp skills/using-flow-state/SKILL.md ~/.claude/skills/using-flow-state/
 
 ## macOS menu-bar app
 
-A tiny native menu-bar app (`macos/`) runs the Flow State server for you: it
-starts the server at login, shows live status via a wave icon with a colored
-status pulse (green running, gray stopped, amber transitioning), and offers
-Start / Stop / Restart and Open Dashboard from its menu. See
-[macos/README.md](macos/README.md) for install and usage.
+A native (Swift / AppKit + SwiftUI) menu-bar app (`macos/`) runs the server for
+you and shows the dashboard as a **native SwiftUI window** - 1:1 with the web UI,
+talking to the same local REST + SSE API (no web view). It starts the server at
+login, shows live status via a wave icon (green running / gray stopped / amber
+transitioning), and offers Start / Stop / Restart and Open Dashboard from its menu.
+
+```bash
+macos/install.sh   # builds FlowState.app, installs to /Applications, autostarts at login
+```
+
+See [macos/README.md](macos/README.md) for details.
+
+> The macOS app is **optional**. The server is a normal Next.js app you can run on
+> its own with `npm run start` (or `npm run dev`) - the menu-bar app just supervises
+> that same server for you, and can attach to an already-running one with `--no-server`.
 
 ## Internationalization
 

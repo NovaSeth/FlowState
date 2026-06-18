@@ -48,3 +48,7 @@ next-env.d.ts
 
 # Local Claude Code config (not part of the app)
 /.claude/
+
+# macOS native build artifacts
+/macos/.build
+/macos/build

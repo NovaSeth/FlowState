@@ -1,6 +1,12 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Icon } from "./icons";
 import { useT } from "@/i18n/provider";
 
@@ -10,7 +16,18 @@ import { useT } from "@/i18n/provider";
  * markup, classes and behavior previously duplicated near-verbatim in both files.
  */
 
-export function ColHeader({ title, count }: { title: string; count: number }) {
+export function ColHeader({
+  title,
+  count,
+  onCollapse,
+}: {
+  title: string;
+  count: number;
+  // When provided, renders a left-pointing chevron at the right edge that
+  // collapses the column. Absent -> no control (non-collapsible columns).
+  onCollapse?: () => void;
+}) {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-2.5">
       <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
@@ -19,7 +36,147 @@ export function ColHeader({ title, count }: { title: string; count: number }) {
       <span className="rounded-full bg-neutral-muted px-1.5 py-0.5 font-mono text-[10px] text-fg-muted">
         {count}
       </span>
+      {onCollapse && (
+        <button
+          onClick={onCollapse}
+          aria-label={t("common.collapse")}
+          title={t("common.collapse")}
+          className="-mr-1 ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-subtle hover:bg-neutral-muted hover:text-fg"
+        >
+          {/* The chevron icon points right; rotate 180deg for a left-pointing one. */}
+          <Icon name="chevron" size={15} className="rotate-180" />
+        </button>
+      )}
     </div>
+  );
+}
+
+/**
+ * localStorage key holding the collapsed state of every collapsible Miller
+ * column, shaped as `{ [collapseId]: boolean }` (true = collapsed). A single
+ * external store backs all collapsible columns: each subscribes via
+ * useSyncExternalStore, so a toggle (or another tab) updates them in sync and
+ * survives navigation / reload.
+ */
+const COLLAPSE_STORE_KEY = "fs.miller.collapsed";
+
+const collapseListeners = new Set<() => void>();
+// Cached snapshot so getSnapshot returns a stable reference between writes
+// (useSyncExternalStore requires referential stability when nothing changed).
+let collapseSnapshot: Record<string, boolean> = {};
+let collapseSnapshotRaw: string | null = null;
+
+function readCollapsedMap(): Record<string, boolean> {
+  // Guard against SSR / no-window and malformed JSON: any failure -> empty map.
+  if (typeof window === "undefined") return {};
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(COLLAPSE_STORE_KEY);
+  } catch {
+    // Storage unavailable (private mode): fall back to the default.
+    return {};
+  }
+  if (raw === collapseSnapshotRaw) return collapseSnapshot;
+  collapseSnapshotRaw = raw;
+  collapseSnapshot = {};
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        collapseSnapshot = parsed as Record<string, boolean>;
+      }
+    } catch {
+      // Malformed JSON: keep the empty fallback.
+    }
+  }
+  return collapseSnapshot;
+}
+
+function setCollapsed(collapseId: string, value: boolean) {
+  const map = { ...readCollapsedMap(), [collapseId]: value };
+  try {
+    window.localStorage.setItem(COLLAPSE_STORE_KEY, JSON.stringify(map));
+  } catch {
+    // Storage may be unavailable (private mode / quota): persistence is
+    // best-effort, but still update the in-memory snapshot so the UI responds.
+  }
+  collapseSnapshot = map;
+  collapseSnapshotRaw = JSON.stringify(map);
+  collapseListeners.forEach((fn) => fn());
+}
+
+function subscribeCollapse(fn: () => void) {
+  collapseListeners.add(fn);
+  // Reflect changes made in other tabs (storage event fires cross-tab only).
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === COLLAPSE_STORE_KEY) fn();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    collapseListeners.delete(fn);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+/**
+ * Reads/writes a single collapsible column's persisted state under `collapseId`.
+ * SSR-safe via useSyncExternalStore (server snapshot = expanded). A no-op when
+ * `collapseId` is undefined.
+ */
+function usePersistentCollapse(collapseId: string | undefined) {
+  const getSnapshot = useCallback(
+    () => (collapseId ? !!readCollapsedMap()[collapseId] : false),
+    [collapseId],
+  );
+  const collapsed = useSyncExternalStore(
+    subscribeCollapse,
+    getSnapshot,
+    // Server / first-paint snapshot: always expanded (localStorage is read on
+    // the client only, so this avoids a hydration mismatch).
+    () => false,
+  );
+  const toggle = () => {
+    if (collapseId) setCollapsed(collapseId, !collapsed);
+  };
+  return { collapsed, toggle };
+}
+
+/**
+ * Narrow vertical strip shown in place of a collapsed column: the first letter
+ * of the title (uppercase), the count, and a right-pointing chevron to expand.
+ * Clicking anywhere on the strip expands the column again.
+ */
+function CollapsedColumn({
+  title,
+  count,
+  onExpand,
+}: {
+  title: string;
+  count: number;
+  onExpand: () => void;
+}) {
+  const t = useT();
+  // First grapheme of the localized title, uppercased (no hardcoded English).
+  const letter = (Array.from(title)[0] ?? "").toUpperCase();
+  return (
+    <button
+      onClick={onExpand}
+      aria-label={t("common.expand")}
+      title={title}
+      className="group flex w-9 shrink-0 flex-col items-center gap-2 border-r border-edge bg-canvas py-2.5 text-fg-subtle transition-colors hover:bg-canvas-subtle hover:text-fg"
+    >
+      <Icon name="chevron" size={15} className="shrink-0" />
+      <span className="text-[11px] font-semibold uppercase tracking-[0.5px]">
+        {letter}
+      </span>
+      <span
+        className="rounded-full bg-neutral-muted px-1.5 py-0.5 font-mono text-[10px] text-fg-muted"
+        // Vertical orientation so the count reads top-to-bottom in the strip.
+        style={{ writingMode: "vertical-rl" }}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 
@@ -27,21 +184,38 @@ export function ColHeader({ title, count }: { title: string; count: number }) {
  * A single Miller column: header plus a scrollable body. `scroll` adds the
  * vertical-scroll + bottom padding the Explorer uses on its columns;
  * UsersExplorer keeps the bare body (its children manage their own scroll).
+ *
+ * When `collapseId` is provided the column gains a collapse control whose state
+ * persists in localStorage under that id; when collapsed the body is replaced by
+ * a narrow strip (CollapsedColumn). Without `collapseId` the column behaves
+ * exactly as before (non-collapsible).
  */
 export function Column({
   title,
   count,
   scroll = false,
+  collapseId,
   children,
 }: {
   title: string;
   count: number;
   scroll?: boolean;
+  collapseId?: string;
   children: ReactNode;
 }) {
+  const { collapsed, toggle } = usePersistentCollapse(collapseId);
+
+  if (collapseId && collapsed) {
+    return <CollapsedColumn title={title} count={count} onExpand={toggle} />;
+  }
+
   return (
     <div className="flex w-72 shrink-0 flex-col border-r border-edge bg-canvas">
-      <ColHeader title={title} count={count} />
+      <ColHeader
+        title={title}
+        count={count}
+        onCollapse={collapseId ? toggle : undefined}
+      />
       <div className={`min-h-0 flex-1${scroll ? " overflow-y-auto pb-2" : ""}`}>
         {children}
       </div>

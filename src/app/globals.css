@@ -6,6 +6,7 @@
  * Light is the default; the prefers-color-scheme: dark block overrides the same names.
  * Never hardcode colors - always go through a variable, otherwise dark mode breaks.
  */
+/* GENERATED FROM src/design/tokens.json by scripts/gen-tokens.mjs - do not edit by hand. */
 :root {
   --canvas: #ffffff;
   --canvas-subtle: #f6f8fa;
@@ -28,17 +29,12 @@
   --done-muted: #fbefff;
   --neutral-muted: rgba(175, 184, 193, 0.2);
   --neutral-emphasis: #6e7781;
-  /* Brand blue (like the icon/favicon) - constant in light and dark. */
   --brand: #0969da;
-
   --shadow-sm: 0 1px 0 rgba(31, 35, 40, 0.04);
   --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
   --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.2);
-
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
-    Arial, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -64,12 +60,13 @@
     --done-muted: rgba(163, 113, 247, 0.15);
     --neutral-muted: rgba(110, 118, 129, 0.4);
     --neutral-emphasis: #6e7681;
-
+    --brand: #0969da;
     --shadow-sm: 0 0 0 1px rgba(48, 54, 61, 0.6);
     --shadow-md: 0 3px 6px rgba(1, 4, 9, 0.5);
     --shadow-lg: 0 8px 24px rgba(1, 4, 9, 0.6);
   }
 }
+/* END generated tokens */
 
 /* Mapping Primer tokens onto the Tailwind v4 theme. `inline` makes utilities
  * use a reference to the variable (which switches in dark mode at runtime). */

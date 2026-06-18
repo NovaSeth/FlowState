@@ -509,12 +509,21 @@ export function Explorer({
   return (
     <>
       <div className="flex h-full min-h-0 overflow-x-auto">
-        <Column title={t("explorer.solutions")} count={solutions.length}>
+        <Column
+          title={t("explorer.solutions")}
+          count={solutions.length}
+          collapseId="solutions"
+        >
           {solutionsCol}
         </Column>
 
         {solId && (
-          <Column title={t("explorer.projects")} count={projects.length} scroll>
+          <Column
+            title={t("explorer.projects")}
+            count={projects.length}
+            scroll
+            collapseId="projects"
+          >
             {projectsCol}
           </Column>
         )}
@@ -524,6 +533,7 @@ export function Explorer({
             title={t("explorer.milestones")}
             count={milestones.length}
             scroll
+            collapseId="milestones"
           >
             {milestonesCol}
           </Column>

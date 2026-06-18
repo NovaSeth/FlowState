@@ -24,9 +24,7 @@
     "loading": "Ładowanie",
     "loadingEllipsis": "Ladowanie...",
     "saveError": "Blad zapisu",
-    "archived": "Archiwum",
-    "collapse": "Zwin kolumne",
-    "expand": "Rozwin kolumne"
+    "archived": "Archiwum"
   },
   "time": {
     "justNow": "przed chwilą",

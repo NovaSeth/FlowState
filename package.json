@@ -1,6 +1,6 @@
 {
   "name": "flow-state",
-  "version": "1.0.0",
+  "version": "1.34.0",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -10,6 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "gen:tokens": "node scripts/gen-tokens.mjs",
+    "predev": "node scripts/gen-tokens.mjs",
+    "prebuild": "node scripts/gen-tokens.mjs",
     "seed": "tsx scripts/seed.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

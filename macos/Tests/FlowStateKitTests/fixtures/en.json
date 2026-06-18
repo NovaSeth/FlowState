@@ -24,9 +24,7 @@
     "loading": "Loading",
     "loadingEllipsis": "Loading...",
     "saveError": "Save error",
-    "archived": "Archived",
-    "collapse": "Collapse column",
-    "expand": "Expand column"
+    "archived": "Archived"
   },
   "time": {
     "justNow": "just now",

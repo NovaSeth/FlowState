@@ -10,7 +10,10 @@ MACOS_DIR="$APP/Contents/MacOS"
 RES_DIR="$APP/Contents/Resources"
 BIN="$MACOS_DIR/FlowState"
 
-VERSION="0.2.0"
+# UI version, shared scheme with the web (vMAJOR.MINOR, +1 MINOR per UI commit;
+# kept in lockstep with UI_VERSION in src/components/NavRail.tsx). The native rail
+# shows this via CFBundleShortVersionString.
+VERSION="1.34"
 ARCH="$(uname -m)"          # arm64 or x86_64
 MIN_MACOS="13.0"
 
@@ -60,10 +63,15 @@ swiftc \
     -framework ServiceManagement \
     -framework Network \
     -framework WebKit \
+    -framework SwiftUI \
     -o "$BIN" \
-    src/main.swift src/AppDelegate.swift src/ServerController.swift src/FlowIcon.swift src/ControlServer.swift src/DashboardWindow.swift src/IconExport.swift
+    src/*.swift Sources/FlowStateKit/*.swift
 
 chmod +x "$BIN"
+
+echo "[build] copying shared resources (i18n + design tokens)"
+cp ../src/i18n/en.json ../src/i18n/pl.json "$RES_DIR/"
+cp ../src/design/tokens.json "$RES_DIR/"
 
 echo "[build] generating app icon (AppIcon.icns) from the Flow wave"
 ICONSET="$(mktemp -d)/AppIcon.iconset"
