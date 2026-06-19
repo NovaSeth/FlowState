@@ -11,15 +11,15 @@ APP_DST="/Applications/Flow State.app"
 PORT="$(defaults read "$APP_DST/Contents/Info" FSPort 2>/dev/null || echo 3000)"
 case "$PORT" in (''|*[!0-9]*) PORT=3000 ;; esac
 
-echo "==> quitting the menu-bar app (also stops the server)"
+echo "==> quitting the menu-bar client app"
 osascript -e 'tell application "Flow State" to quit' 2>/dev/null || true
 sleep 1
 pkill -f "Flow State.app/Contents/MacOS/FlowState" 2>/dev/null || true
 
-echo "==> unregistering login item"
+echo "==> unregistering app login item"
 launchctl bootout "gui/${UID_NUM}/com.flowstate.menubar" 2>/dev/null || true
 
-echo "==> removing leftover launchd server agent (from older installs)"
+echo "==> stopping + removing the server LaunchAgent"
 launchctl bootout "gui/${UID_NUM}/com.flowstate.server" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/com.flowstate.server.plist"
 

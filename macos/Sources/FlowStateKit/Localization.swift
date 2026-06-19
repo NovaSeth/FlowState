@@ -4,7 +4,9 @@ import Foundation
 /// pl.json (nested objects). `t("users.keyCount", ["n": "3"])` walks the dotted
 /// path and interpolates `{var}` placeholders. Lookup falls back: requested
 /// locale -> "en" -> the key itself.
-public struct Localization {
+/// `@unchecked Sendable`: `locale` and `tables` are immutable `let`s parsed once
+/// from the bundled i18n JSON; the `[String: Any]` holds only immutable JSON values.
+public struct Localization: @unchecked Sendable {
     public let locale: String
     private let tables: [String: NestedTable]
 

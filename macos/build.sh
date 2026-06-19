@@ -13,7 +13,7 @@ BIN="$MACOS_DIR/FlowState"
 # UI version, shared scheme with the web (vMAJOR.MINOR, +1 MINOR per UI commit;
 # kept in lockstep with UI_VERSION in src/components/NavRail.tsx). The native rail
 # shows this via CFBundleShortVersionString.
-VERSION="1.35"
+VERSION="1.36"
 ARCH="$(uname -m)"          # arm64 or x86_64
 MIN_MACOS="13.0"
 
@@ -42,7 +42,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
     <key>CFBundleVersion</key>         <string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key>  <string>${MIN_MACOS}</string>
-    <key>LSUIElement</key>             <true/>
+    <!-- No LSUIElement: main.swift sets .accessory at launch (menu-bar only), but
+         WITHOUT the static agent flag the app becomes a full, normal app when the
+         dashboard window opens (reliable menu bar + Cmd+Q). LSUIElement=true would
+         keep it a half-agent and break Cmd+Q / make it feel unlike other apps. -->
     <key>NSHighResolutionCapable</key> <true/>
     <key>NSAppTransportSecurity</key>
     <dict>
@@ -55,9 +58,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "[build] compiling Swift sources (${ARCH}, macOS ${MIN_MACOS}+)"
+echo "[build] compiling Swift sources (${ARCH}, macOS ${MIN_MACOS}+, Swift 6 mode)"
+# -swift-version 6: build the shipping binary under the SAME strict actor-isolation
+# / Sendable checking as the unit-tested FlowStateKit package (swift-tools-version
+# 6.0), so concurrency mistakes are compile-time errors here too, not silent races.
 swiftc \
     -O \
+    -swift-version 6 \
     -target "${ARCH}-apple-macos${MIN_MACOS}" \
     -framework AppKit \
     -framework ServiceManagement \

@@ -4,12 +4,15 @@ import Foundation
 // timeAgo, and the sort ranks the explorer uses for list/kanban ordering.
 
 enum DateUtil {
-    static let isoFractional: ISO8601DateFormatter = {
+    // nonisolated(unsafe): configured once and only ever used for `.date(from:)`
+    // (read-only parsing), so the shared instances are safe to reuse - the checker
+    // just cannot prove it for a non-Sendable Foundation formatter.
+    nonisolated(unsafe) static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
-    static let isoPlain: ISO8601DateFormatter = {
+    nonisolated(unsafe) static let isoPlain: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f
@@ -37,6 +40,12 @@ func timeAgo(_ iso: String, _ i18n: Localization, now: Date = Date()) -> String 
 func formatTimestamp(_ iso: String) -> String {
     guard let date = DateUtil.parse(iso) else { return iso }
     let f = DateFormatter()
+    // Pin a fixed Gregorian/POSIX calendar so the `yyyy` token renders a stable
+    // ISO-style year regardless of the system region (a non-Gregorian default
+    // calendar - Japanese era, Buddhist - would otherwise print a wrong year).
+    // Timezone stays the device's local zone, matching the web's local timestamp.
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
     f.dateFormat = "yyyy-MM-dd HH:mm"
     return f.string(from: date)
 }

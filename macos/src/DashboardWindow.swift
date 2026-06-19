@@ -10,6 +10,7 @@ import SwiftUI
 ///
 /// The window owner (AppDelegate) flips the app's activation policy to `.regular`
 /// while the window is open (Dock icon) and back to `.accessory` on close.
+@MainActor
 final class DashboardWindowController: NSObject, NSWindowDelegate {
     private let controller: ServerController
     private var window: NSWindow?
@@ -26,10 +27,27 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
     /// Create the window on first use, then bring it to front. No reload: the
     /// AppStore keeps the current section/selection across opens.
     func show() {
-        if window == nil { buildWindow() }
+        let firstBuild = (window == nil)
+        if firstBuild { buildWindow() }
         guard let window else { return }
         window.makeKeyAndOrderFront(nil)
+        ensureOnScreen(window)
         NSApp.activate(ignoringOtherApps: true)
+        // First open relies on the root view's `.task { bootstrap() }`; a reopen
+        // (the stream was suspended on the previous close) resumes it and catches up.
+        if !firstBuild, let store {
+            _Concurrency.Task { await store.resumeLive() }
+        }
+    }
+
+    /// Keep the window fully inside the active screen's visible area. A stale saved
+    /// frame (setFrameAutosaveName) can otherwise place the title bar at or above the
+    /// menu bar, so its top is clipped by the menu bar - which reads as "the app is
+    /// cut off at the top". constrainFrameRect pins the top edge below the menu bar.
+    private func ensureOnScreen(_ window: NSWindow) {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        let fitted = window.constrainFrameRect(window.frame, to: screen)
+        if fitted != window.frame { window.setFrame(fitted, display: true) }
     }
 
     private func buildWindow() {
@@ -49,6 +67,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
         win.delegate = self
         win.setFrameAutosaveName("FlowStateDashboardWindow")
         win.isReleasedWhenClosed = false   // reuse the same window across opens
+        win.backgroundColor = DS.nsColor("canvas")
         win.center()
 
         win.contentViewController = NSHostingController(
@@ -67,6 +86,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
+        // Release the live SSE connection + watchdog while the window is gone; it
+        // resumes on the next show(). Prevents an invisible stream/timer running for
+        // the rest of the app's lifetime.
+        store?.suspendLive()
         onWindowClose?()
     }
 }

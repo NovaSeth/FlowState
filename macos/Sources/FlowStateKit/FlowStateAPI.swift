@@ -9,7 +9,7 @@ public struct APIError: Error, CustomStringConvertible {
 /// Async REST client for the Flow State server. Every request carries the
 /// `x-fs-dashboard: 1` trust header, mirroring the web dashboard: this grants
 /// keyless local read AND write (mutations) against the default local server.
-public struct FlowStateAPI {
+public struct FlowStateAPI: Sendable {
     private let baseURL: URL
     private let session: URLSession
 

@@ -7,7 +7,11 @@ import Network
 /// This lets the Settings page (already loaded) do Start/Stop/Restart even when
 /// Next itself is down - it talks directly to THIS port, not through Next. CORS open
 /// (local project). Routes: GET /status -> {state}, POST /start|/stop|/restart.
-final class ControlServer {
+///
+/// `@unchecked Sendable`: `statusToken` is guarded by `lock`, `listener`/`onCommand`
+/// are written once on the main thread before start(), and the NW handlers run on
+/// the private `queue` - safe to share, but not provable to the checker.
+final class ControlServer: @unchecked Sendable {
     private let port: NWEndpoint.Port
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "com.flowstate.control", qos: .utility)

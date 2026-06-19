@@ -1,6 +1,8 @@
 import AppKit
 
-// Status-bar-only app: no Dock icon, no main window (LSUIElement in Info.plist).
+// Start status-bar-only: no Dock icon, no main window. We set .accessory in code
+// (NOT LSUIElement in Info.plist) so that when the dashboard window opens the app can
+// flip to .regular and behave like a normal app - real menu bar, working Cmd+Q.
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 

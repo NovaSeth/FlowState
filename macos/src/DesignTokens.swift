@@ -7,7 +7,10 @@ import AppKit
 // follow the system light/dark appearance, plus the status/priority semantics
 // mirrored from src/lib/labels.ts. There are no hardcoded hex values here: the
 // palette lives in tokens.json so web and native never drift.
-struct DesignTokens {
+// `@unchecked Sendable`: every stored property is a `let` parsed once at init from
+// the bundled tokens.json and never mutated; the `[String: Any]` holds only
+// immutable JSON values. Safe to expose as the global `DS` / `shared` singleton.
+struct DesignTokens: @unchecked Sendable {
     static let shared = DesignTokens()
 
     private let raw: [String: Any]
@@ -23,6 +26,16 @@ struct DesignTokens {
     }
 
     // MARK: - Color by token name (dynamic light/dark)
+
+    /// The dynamic NSColor for a token (used for AppKit surfaces like the window
+    /// background, so the transparent title bar blends with the SwiftUI canvas).
+    func nsColor(_ token: String) -> NSColor {
+        let l = light[token] ?? .clear
+        let d = dark[token] ?? l
+        return NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? d : l
+        }
+    }
 
     /// A dynamic color that resolves per the view's effective appearance. Unknown
     /// tokens resolve to clear so a typo is visible (missing) rather than crashing.

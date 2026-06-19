@@ -5,13 +5,14 @@ import SwiftUI
 // the user drills in (solution -> project -> milestone -> task), and refetch the
 // visible slice on every SSE change signal (debounced).
 //
-// The class itself is not @MainActor (so the AppKit shell can construct it from a
-// nonisolated context); instead every method that touches @Published state is
-// @MainActor, so all UI mutations happen on the main thread. EventStream's
-// @Sendable callbacks hop back onto the main actor.
+// The whole store is @MainActor: it is built and driven from the AppKit main thread
+// and every @Published mutation must land on the main thread anyway. Being a
+// main-actor (hence Sendable) type also lets EventStream's @Sendable callbacks
+// capture a weak reference and hop back onto the main actor.
 //
 // Note: FlowStateKit defines a `Task` model that shadows Swift Concurrency's
 // `Task`, so concurrency uses the fully-qualified `_Concurrency.Task`.
+@MainActor
 final class AppStore: ObservableObject {
     enum Section: String, CaseIterable { case overview, explore, users, settings }
     enum TaskViewMode: String, CaseIterable { case list, kanban }
@@ -85,9 +86,17 @@ final class AppStore: ObservableObject {
     @MainActor
     func bootstrap() async {
         await reloadOverview()
+        await startEvents()
+    }
+
+    /// Start the SSE stream if it is not already running. Idempotent: `started` is
+    /// flipped before the first `await`, so concurrent callers (initial bootstrap +
+    /// resumeLive on window show) never double-subscribe.
+    @MainActor
+    private func startEvents() async {
         guard !started else { return }
         started = true
-        await events.start(
+        events.start(
             onChange: { [weak self] in
                 _Concurrency.Task { @MainActor in self?.scheduleRefetch() }
             },
@@ -95,6 +104,22 @@ final class AppStore: ObservableObject {
                 _Concurrency.Task { @MainActor in self?.isOnline = online }
             }
         )
+    }
+
+    /// Tear down the live SSE connection + watchdog (called when the dashboard
+    /// window closes) so they do not keep running invisibly for the app's lifetime.
+    @MainActor
+    func suspendLive() {
+        events.stop()
+        started = false
+    }
+
+    /// Resume the live stream when the window reopens and catch up on anything that
+    /// changed while it was suspended.
+    @MainActor
+    func resumeLive() async {
+        await startEvents()
+        await refetchVisible()
     }
 
     /// Debounce a burst of SSE signals into a single visible-slice refetch.
@@ -149,7 +174,19 @@ final class AppStore: ObservableObject {
     }
     @MainActor
     private func loadTaskDetail(_ id: String) async {
-        do { taskDetail = try await api.taskDetail(id: id) } catch { capture(error) }
+        do { taskDetail = try await api.taskDetail(id: id) }
+        catch {
+            // The selected task was deleted/pruned (e.g. by another agent): drop the
+            // stale selection + detail instead of leaving the inspector open on a
+            // task that no longer exists.
+            if (error as? APIError)?.status == 404 {
+                if selectedTaskId == id { selectedTaskId = nil }
+                taskDetail = nil
+                errorMessage = nil
+            } else {
+                capture(error)
+            }
+        }
     }
 
     // MARK: - Selection (drill). Each level resets the deeper ones, like the web.
@@ -262,14 +299,18 @@ final class AppStore: ObservableObject {
         } catch { capture(error) }
     }
 
+    /// Returns true only if the comment was accepted by the server, so the view can
+    /// keep the user's draft on failure rather than discarding it.
     @MainActor
-    func addComment(_ taskId: String, _ body: String) async {
+    @discardableResult
+    func addComment(_ taskId: String, _ body: String) async -> Bool {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else { return false }
         do {
             _ = try await api.addComment(taskId: taskId, body: text)
             await loadTaskDetail(taskId)
-        } catch { capture(error) }
+            return true
+        } catch { capture(error); return false }
     }
 
     // MARK: - Locale

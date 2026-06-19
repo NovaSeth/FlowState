@@ -314,14 +314,14 @@ struct DailyChart: View {
                 ForEach(Array(data.statuses.enumerated()), id: \.offset) { si, status in
                     Path { p in
                         for i in data.days.indices {
-                            let v = si < data.counts[i].count ? data.counts[i][si] : 0
+                            let v = (i < data.counts.count && si < data.counts[i].count) ? data.counts[i][si] : 0
                             let pt = CGPoint(x: xFor(i), y: yFor(v))
                             if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
                         }
                     }
                     .stroke(DS.statusBar(status), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
                     ForEach(data.days.indices, id: \.self) { i in
-                        let v = si < data.counts[i].count ? data.counts[i][si] : 0
+                        let v = (i < data.counts.count && si < data.counts[i].count) ? data.counts[i][si] : 0
                         Circle().fill(DS.statusBar(status)).frame(width: 4.4, height: 4.4)
                             .position(x: xFor(i), y: yFor(v))
                     }

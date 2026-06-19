@@ -21,6 +21,10 @@ struct ExplorerView: View {
             }
             if store.selectedTaskId != nil {
                 TaskDetailPanel()
+                    // Remount per task so the panel's editing @State (comment draft,
+                    // pending-block reason) starts fresh and never carries over onto
+                    // a different task.
+                    .id(store.selectedTaskId)
                     .frame(width: 380)
                     .overlay(Rectangle().frame(width: 1).foregroundStyle(DS.border), alignment: .leading)
             }
@@ -227,7 +231,7 @@ struct TaskPaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             viewTabs
-            if store.tasks.isEmpty {
+            if visible.isEmpty {
                 ColumnHint(text: i18n.t("explorer.noTasks"))
                 Spacer()
             } else if store.taskViewMode == .list {
@@ -314,7 +318,10 @@ struct TaskPaneView: View {
 
     private var kanbanColumns: [TaskStatus] {
         DS.statusOrder.filter { s in
-            s == .closed ? store.tasks.contains { $0.base.status == .closed } : true
+            // Gate the closed column on the VISIBLE set (matches the web): with
+            // show-closed off, `visible` has no closed tasks, so the column does not
+            // appear as an empty phantom.
+            s == .closed ? visible.contains { $0.base.status == .closed } : true
         }
     }
 

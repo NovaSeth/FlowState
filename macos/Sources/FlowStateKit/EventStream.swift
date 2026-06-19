@@ -53,73 +53,181 @@ public struct Liveness: Sendable {
 }
 
 /// Consumes /api/events and drives two callbacks: `onChange` (refetch) and
-/// `onOnline` (liveness). Auto-reconnects with a short backoff. The pure parsing
-/// and liveness math (SSEParser, Liveness) are unit-tested; this transport shell
-/// is exercised by the app smoke test.
-public actor EventStream {
+/// `onOnline` (liveness). Auto-reconnects with a short backoff.
+///
+/// Transport: a `URLSessionDataDelegate` that receives `didReceive data` chunks in
+/// real time. This is deliberate - `URLSession.AsyncBytes.lines` buffers and does
+/// NOT deliver an SSE stream's small, infrequent frames promptly, so the heartbeat
+/// never arrived and the watchdog flipped the dashboard permanently offline. The
+/// delegate sees each chunk as the network delivers it (exactly what an EventSource
+/// needs). The pure parsing/liveness math (SSEParser, Liveness) is unit-tested.
+///
+/// `@unchecked Sendable`: all mutable state is guarded by `lock`; the URLSession
+/// delegate callbacks arrive on a private serial queue.
+public final class EventStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let eventsURL: URL
-    private let session: URLSession
     private let liveness = Liveness()
+
+    private let lock = NSLock()
     private var lastPing = Date()
     private var running = false
     private var onChange: (@Sendable () -> Void)?
     private var onOnline: (@Sendable (Bool) -> Void)?
+    private var parser = SSEParser()
+    private var byteBuffer = Data()
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var watchdogTask: _Concurrency.Task<Void, Never>?
 
     public init(baseURL: URL, session: URLSession = .shared) {
         var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         comps.path = "/api/events"
         eventsURL = comps.url!
-        self.session = session
+        super.init()
     }
 
     public func start(
         onChange: @escaping @Sendable () -> Void,
         onOnline: @escaping @Sendable (Bool) -> Void
     ) {
+        lock.lock()
         self.onChange = onChange
         self.onOnline = onOnline
-        guard !running else { return }
+        if running { lock.unlock(); return }
         running = true
-        _Concurrency.Task { await self.watchdog() }
-        _Concurrency.Task { await self.readLoop() }
+        lock.unlock()
+        startWatchdog()
+        connect()
     }
 
     public func stop() {
+        lock.lock()
         running = false
+        task?.cancel(); task = nil
+        session?.invalidateAndCancel(); session = nil
+        let w = watchdogTask; watchdogTask = nil
+        lock.unlock()
+        w?.cancel()
     }
+
+    // MARK: - transport
+
+    private func connect() {
+        lock.lock()
+        guard running else { lock.unlock(); return }
+        parser = SSEParser()
+        byteBuffer = Data()
+        session?.invalidateAndCancel()
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.waitsForConnectivity = false
+        let newSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        session = newSession
+        var req = URLRequest(url: eventsURL)
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        // Ask for an uncompressed stream so frames are never withheld in a
+        // decompression buffer.
+        req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        let newTask = newSession.dataTask(with: req)
+        task = newTask
+        lock.unlock()
+        newTask.resume()
+    }
+
+    private func scheduleReconnect() {
+        lock.lock(); let go = running; lock.unlock()
+        guard go else { return }
+        _Concurrency.Task { [weak self] in
+            try? await _Concurrency.Task.sleep(nanoseconds: 2_000_000_000)
+            self?.connect()
+        }
+    }
+
+    // MARK: - liveness
 
     private func markAlive() {
-        lastPing = Date()
-        onOnline?(true)
+        lock.lock(); lastPing = Date(); let cb = onOnline; lock.unlock()
+        cb?(true)
     }
 
-    private func watchdog() async {
-        while running {
-            try? await _Concurrency.Task.sleep(nanoseconds: 3_000_000_000)
-            if running, !liveness.isOnline(lastPing: lastPing, now: Date()) {
-                onOnline?(false)
+    private func emitOnline(_ value: Bool) {
+        lock.lock(); let cb = onOnline; lock.unlock()
+        cb?(value)
+    }
+
+    private func emitChange() {
+        lock.lock(); let cb = onChange; lock.unlock()
+        cb?()
+    }
+
+    private func startWatchdog() {
+        lock.lock()
+        watchdogTask?.cancel()
+        watchdogTask = _Concurrency.Task { [weak self] in
+            while true {
+                try? await _Concurrency.Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, !_Concurrency.Task.isCancelled else { return }
+                if !self.tickWatchdog() { return }
+            }
+        }
+        lock.unlock()
+    }
+
+    /// Returns false to stop the watchdog (stream stopped); emits offline on a gap.
+    private func tickWatchdog() -> Bool {
+        lock.lock()
+        let run = running
+        let stale = !liveness.isOnline(lastPing: lastPing, now: Date())
+        lock.unlock()
+        guard run else { return false }
+        if stale { emitOnline(false) }
+        return true
+    }
+
+    // MARK: - URLSessionDataDelegate
+
+    public func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if (200..<300).contains(code) {
+            markAlive()
+            completionHandler(.allow)
+        } else {
+            // Non-2xx is not a live event channel: cancel and let didComplete back off.
+            emitOnline(false)
+            completionHandler(.cancel)
+        }
+    }
+
+    public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        var events: [SSEEvent] = []
+        lock.lock()
+        byteBuffer.append(data)
+        while let nl = byteBuffer.firstIndex(of: 0x0A) {          // split on LF
+            let lineData = byteBuffer.prefix(upTo: nl)
+            byteBuffer = Data(byteBuffer.suffix(from: byteBuffer.index(after: nl)))
+            var line = String(decoding: lineData, as: UTF8.self)
+            if line.hasSuffix("\r") { line.removeLast() }         // tolerate CRLF
+            if let ev = parser.feed(line) { events.append(ev) }
+        }
+        lock.unlock()
+        for ev in events {
+            switch ev {
+            case .ping: markAlive()
+            case .change: markAlive(); emitChange()
             }
         }
     }
 
-    private func readLoop() async {
-        var parser = SSEParser()
-        while running {
-            do {
-                let (bytes, _) = try await session.bytes(from: eventsURL)
-                markAlive()
-                for try await line in bytes.lines {
-                    if !running { break }
-                    switch parser.feed(line) {
-                    case .ping: markAlive()
-                    case .change: markAlive(); onChange?()
-                    case nil: break
-                    }
-                }
-            } catch {
-                onOnline?(false)
-            }
-            if running { try? await _Concurrency.Task.sleep(nanoseconds: 2_000_000_000) }
-        }
+    public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let isCurrent = (task === self.task)
+        lock.unlock()
+        guard isCurrent else { return }   // a superseded/old connection: ignore
+        emitOnline(false)
+        scheduleReconnect()
     }
 }

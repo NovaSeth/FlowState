@@ -1,6 +1,10 @@
 import AppKit
 import ServiceManagement
 
+// The whole controller lives on the main thread (status item, menu, NSApp, timers).
+// Making that explicit isolates every method to the main actor, so AppKit access is
+// checked-correct; blocking server I/O is the only thing hopped onto `work`.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = ServerController()
     private var statusItem: NSStatusItem!
@@ -37,24 +41,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self            // rebuilt fresh each time it opens
+        // Make our explicit per-item isEnabled authoritative. With the default
+        // auto-validation, AppKit would re-enable any item with a valid action+target
+        // (e.g. "Open in Browser") regardless of the enabled: we pass, so it would
+        // stay clickable while the server is down.
+        menu.autoenablesItems = false
         statusItem.menu = menu
         installMainMenu()
         renderState()
 
         // Autostart: register as a login item on the FIRST ever launch only.
-        // After that we honor the user's toggle choice (persisted in UserDefaults)
-        // instead of re-enabling it on every launch (which would override a user
-        // who deliberately turned it off).
+        // After that we never re-register at launch, so the user's toggle choice
+        // (reflected by SMAppService.mainApp.status) stands - a deliberate "off" is
+        // not silently re-enabled.
         registerLoginItemIfFirstLaunch()
 
         // Local control port (web Settings: Start/Stop/Restart). Server port + 1.
         let cs = ControlServer(port: UInt16(controller.port + 1))
+        // ControlServer always invokes this on the main thread (see its route()).
         cs.onCommand = { [weak self] cmd in
-            switch cmd {
-            case "start": self?.startServer()
-            case "stop": self?.stopServer()
-            case "restart": self?.restartServer()
-            default: break
+            MainActor.assumeIsolated {
+                switch cmd {
+                case "start": self?.startServer()
+                case "stop": self?.stopServer()
+                case "restart": self?.restartServer()
+                default: break
+                }
             }
         }
         cs.start()
@@ -63,13 +75,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         schedulePoll(interval: slowInterval)
         pulseTimer = Timer.scheduledTimer(withTimeInterval: pulseInterval, repeats: true) { [weak self] _ in
-            self?.checkPulse()
+            MainActor.assumeIsolated { self?.checkPulse() }
         }
-        // Bring the server up on launch (i.e. at login) unless it already runs.
-        // `--no-server` skips this: the app then drives an externally-managed server
-        // (e.g. `npm run dev` in a terminal) instead of owning the child process.
+        // Nudge the independent server agent up if it is installed but not serving.
+        // The app does NOT own the server (it is a launchd agent); this is just a
+        // convenience. `--no-server` skips even the nudge (pure observer).
         if !CommandLine.arguments.contains("--no-server") {
             startServerIfNeeded()
+        } else {
+            refreshNow()
         }
 
         // Optional: open straight to the dashboard window on launch (for a
@@ -90,11 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // The server is our child process; tear it down cleanly on quit. With
-        // `--no-server` we do not own it (external dev server), so leave it running.
-        if !CommandLine.arguments.contains("--no-server") {
-            controller.stop()
-        }
+        // The server is an independent launchd agent and keeps running after we
+        // quit - we are only a client. Nothing to tear down here.
     }
 
     /// Install a standard NSMainMenu so the app has a real menu bar (an "About /
@@ -136,6 +147,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        // Standard Window menu (Minimize / Zoom / Close) so the app behaves like a
+        // normal Mac app when the dashboard window is up. NSApp.windowsMenu wires the
+        // automatic window list.
+        let windowItem = NSMenuItem()
+        mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowItem.submenu = windowMenu
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
     }
@@ -210,7 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        menu.addItem(item("Quit Flow State (app & server)", #selector(quit), enabled: true))
+        menu.addItem(item("Quit Flow State (server keeps running)", #selector(quit), enabled: true))
     }
 
     private func item(_ title: String, _ action: Selector?, enabled: Bool) -> NSMenuItem {
@@ -288,13 +312,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func checkPulse() {
         guard state == .running else { lastPulse = nil; return }
-        work.async {
-            self.controller.fetchPulse { count in
-                guard let count = count else { return }
-                DispatchQueue.main.async {
-                    if let last = self.lastPulse, count > last { self.blink() }
-                    self.lastPulse = count
-                }
+        // fetchPulse is non-blocking (URLSession); call it directly and hop the
+        // result back onto the main actor.
+        controller.fetchPulse { [weak self] count in
+            guard let count else { return }
+            _Concurrency.Task { @MainActor in
+                guard let self else { return }
+                if let last = self.lastPulse, count > last { self.blink() }
+                self.lastPulse = count
             }
         }
     }
@@ -306,9 +331,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ctx.duration = 0.07
             btn.animator().alphaValue = 0.3
         }, completionHandler: {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
-                btn.animator().alphaValue = 1.0
+            // AppKit runs this on the main thread; assert that to the compiler so the
+            // main-actor AppKit calls are legal.
+            MainActor.assumeIsolated {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.2
+                    btn.animator().alphaValue = 1.0
+                }
             }
         })
     }
@@ -344,7 +373,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func restartServer() { beginTransition(target: .running) { self.controller.restart() } }
 
     private func startServerIfNeeded() {
-        if controller.isProcessAlive() { refreshNow(); return }
+        // If the agent is installed, ensure it is up (idempotent kickstart); else we
+        // can only observe whatever server happens to be serving.
+        guard controller.isAgentInstalled else { refreshNow(); return }
         beginTransition(target: .running) { self.controller.start() }
     }
 
@@ -354,8 +385,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 if enable { try SMAppService.mainApp.register() }
                 else      { try SMAppService.mainApp.unregister() }
-                // Persist the explicit choice so launch does not override it.
-                UserDefaults.standard.set(enable, forKey: Self.loginChoiceKey)
             } catch {
                 NSLog("FlowState: toggle login item failed: \(error)")
             }
@@ -367,40 +396,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - transitions + polling
 
-    private func beginTransition(target: ServerState, action: @escaping () -> Void) {
+    private func beginTransition(target: ServerState, action: @escaping @Sendable () -> Void) {
         transitionTarget = target
         transitionDeadline = Date().addingTimeInterval(30)
         renderState()
         schedulePoll(interval: fastInterval)
-        work.async {
+        // `action` is the blocking server call (start/stop/restart) - run it off the
+        // main actor, then hop back to refresh.
+        work.async { [weak self] in
             action()
-            DispatchQueue.main.async { self.refreshNow() }
+            _Concurrency.Task { @MainActor in self?.refreshNow() }
         }
     }
 
     private func schedulePoll(interval: TimeInterval) {
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.refreshNow()
+            MainActor.assumeIsolated { self?.refreshNow() }
         }
     }
 
     private func refreshNow() {
-        work.async {
-            self.controller.refreshState { base in
-                DispatchQueue.main.async {
-                    self.applyBaseState(base)
-                    if base == .running {
-                        self.controller.fetchStats { s in
-                            DispatchQueue.main.async {
-                                self.stats = s
-                                self.renderState()
-                            }
+        // refreshState / fetchStats are non-blocking (URLSession); call directly and
+        // hop each result back onto the main actor.
+        controller.refreshState { [weak self] base in
+            _Concurrency.Task { @MainActor in
+                guard let self else { return }
+                self.applyBaseState(base)
+                if base == .running {
+                    self.controller.fetchStats { [weak self] s in
+                        _Concurrency.Task { @MainActor in
+                            guard let self else { return }
+                            self.stats = s
+                            self.renderState()
                         }
-                    } else if self.stats != nil {
-                        self.stats = nil
-                        self.renderState()
                     }
+                } else if self.stats != nil {
+                    self.stats = nil
+                    self.renderState()
                 }
             }
         }
@@ -426,28 +459,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - login item for this controller app
 
-    /// UserDefaults keys: whether we have ever launched, and the user's last
-    /// explicit Launch-at-Login choice.
+    /// UserDefaults key: whether we have ever opted the user into autostart.
     private static let firstLaunchDoneKey = "com.flowstate.firstLaunchDone"
-    private static let loginChoiceKey = "com.flowstate.launchAtLogin"
 
-    /// On the very first launch, opt the user into autostart (so installing the
-    /// app "just works"). On later launches we do NOT touch the registration -
-    /// the user's toggle choice (persisted by toggleOpenAtLogin) is authoritative,
-    /// so a deliberate "off" is not silently re-enabled.
+    /// On the very first launch, opt the user into autostart (so installing the app
+    /// "just works"). On later launches we do NOT touch the registration -
+    /// SMAppService.mainApp.status is the single source of truth (read by
+    /// isLoginEnabled / toggled by the menu), and nothing re-registers at launch, so
+    /// a deliberate "off" is never silently re-enabled.
     private func registerLoginItemIfFirstLaunch() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.firstLaunchDoneKey) else { return }
-        defaults.set(true, forKey: Self.firstLaunchDoneKey)
         if #available(macOS 13.0, *) {
             do {
                 if SMAppService.mainApp.status != .enabled {
                     try SMAppService.mainApp.register()
                 }
-                defaults.set(true, forKey: Self.loginChoiceKey)
+                // Record first-launch-done only AFTER a successful registration, so a
+                // transient failure (e.g. an unsigned dev build) is retried next
+                // launch instead of permanently abandoning the autostart opt-in.
+                defaults.set(true, forKey: Self.firstLaunchDoneKey)
             } catch {
                 NSLog("FlowState: could not register login item: \(error)")
             }
+        } else {
+            // No SMAppService before macOS 13: nothing to register, do not retry.
+            defaults.set(true, forKey: Self.firstLaunchDoneKey)
         }
     }
 

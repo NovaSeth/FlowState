@@ -206,8 +206,11 @@ struct TaskDetailPanel: View {
                         .textFieldStyle(.roundedBorder).lineLimit(1...4)
                     Button(i18n.t("task.send")) {
                         let body = commentDraft
-                        commentDraft = ""
-                        _Concurrency.Task { await store.addComment(detail.base.id, body) }
+                        // Clear the draft only once the post succeeds, so a failed
+                        // send (server down / rejected) keeps the user's text.
+                        _Concurrency.Task {
+                            if await store.addComment(detail.base.id, body) { commentDraft = "" }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -259,9 +262,15 @@ struct TaskDetailPanel: View {
             .background(bg).foregroundStyle(fg).clipShape(Capsule())
     }
 
-    /// The web shows the most recent comment at/before the task's updatedAt as the
-    /// block reason; we use the most recent comment as a close native equivalent.
+    /// Mirror the web: the block reason is the most recent comment created at or
+    /// before the task's updatedAt - NOT simply the newest comment, since a later
+    /// unrelated comment on a still-blocked task would be misattributed.
     private func latestBlockReason(_ detail: TaskDetail) -> String? {
-        detail.comments?.last?.body
+        guard let comments = detail.comments else { return nil }
+        let cutoff = DateUtil.parse(detail.base.updatedAt) ?? .distantFuture
+        return comments
+            .filter { (DateUtil.parse($0.createdAt) ?? .distantPast) <= cutoff }
+            .max { (DateUtil.parse($0.createdAt) ?? .distantPast) < (DateUtil.parse($1.createdAt) ?? .distantPast) }?
+            .body
     }
 }

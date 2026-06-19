@@ -19,32 +19,29 @@ enum ServerState {
     }
 }
 
-/// Owns the Flow State server as a child process and probes it over HTTP.
+/// Client view of the INDEPENDENT Flow State server.
 ///
-/// The server (`npm run start`) is launched as a child of this GUI app rather
-/// than a launchd agent, because the repo lives under ~/Documents (TCC-protected)
-/// and only a user-launched .app gets the native "allow Documents access" grant.
-/// Blocking calls (Process, URLSession) run off the main thread; callers marshal
-/// results back to main.
-final class ServerController {
+/// The server runs as its own launchd LaunchAgent (`com.flowstate.server`): started
+/// at login, kept alive by launchd, and completely separate from this app. This app
+/// is a CLIENT - it probes the server over HTTP for status and can ask launchd to
+/// start/stop/restart the agent, but it never owns the server as a child process and
+/// never stops it on quit. The server therefore survives the app crashing, quitting
+/// or being rebuilt/re-signed.
+///
+/// Why a LaunchAgent + Full Disk Access: the repo lives under ~/Documents, which is
+/// TCC-protected; a launchd agent must be granted Full Disk Access on `node` to read
+/// it. install.sh installs the agent and guides that one-time grant.
+///
+/// `@unchecked Sendable`: it holds only immutable config (let), so it is trivially
+/// safe to share across the menu work queue and the main actor.
+final class ServerController: @unchecked Sendable {
     /// Repo dir, node bin and port are baked into Info.plist by build.sh.
     let repoDir: String
     let nodeBin: String
     let port: Int
 
-    /// Serializes ALL access to the mutable state below. It is mutated from the
-    /// AppDelegate work queue, the Process terminationHandler (Foundation's own
-    /// queue) and the main thread, so every read/write goes through this queue
-    /// (stateQueue.sync for reads, stateQueue.async/sync for writes).
-    private let stateQueue = DispatchQueue(label: "com.flowstate.server.state")
-
-    /// All four fields below are guarded by stateQueue - never touch directly.
-    private var process: Process?
-    /// Set while we deliberately stop, so the crash-relaunch logic stays quiet.
-    private var intentionalStop = false
-    /// Guard against a crash-loop hammering relaunch.
-    private var recentRelaunches = 0
-    private var relaunchWindowStart = Date()
+    /// launchd label / paths for the independent server agent (must match install.sh).
+    let agentLabel = "com.flowstate.server"
 
     init() {
         let info = Bundle.main.infoDictionary
@@ -61,119 +58,69 @@ final class ServerController {
     var dashboardURL: URL { URL(string: "http://localhost:\(port)/")! }
     var host: String { "localhost:\(port)" }
 
-    // MARK: - lifecycle
-
-    func isProcessAlive() -> Bool {
-        stateQueue.sync { process?.isRunning ?? false }
+    private var agentTarget: String { "gui/\(getuid())/\(agentLabel)" }
+    private var plistPath: String {
+        (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist")
     }
 
-    /// Spawn `npm run start` if not already running. Returns true if a process is
-    /// (now) running.
+    // MARK: - agent control (launchctl on the independent server)
+
+    /// Whether the LaunchAgent is installed (its plist exists). When false, the
+    /// server was not set up via install.sh and the app can only observe.
+    var isAgentInstalled: Bool { FileManager.default.fileExists(atPath: plistPath) }
+
+    /// Load (if needed) and (re)start the agent. Idempotent: a bootstrap of an
+    /// already-loaded agent fails harmlessly, then kickstart ensures it is running.
     @discardableResult
     func start() -> Bool {
-        if isProcessAlive() { return true }
-
-        ensureLogDir()
-        let handle = logHandle()
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
-        // Login shell for a full PATH; prepend the known node bin to be safe.
-        let inner = "cd \(shellQuote(repoDir)) && export PATH=\(shellQuote(nodeBin)):$PATH && export PORT=\(port) && exec npm run start"
-        // Make the launched server lead its OWN process group so we can later
-        // signal the whole subtree at once (npm spawns next as a grandchild;
-        // signalling npm's pid alone may not reach next). Foundation.Process
-        // cannot set the child's process group, so we have perl call setpgrp(0,0)
-        // - making this process a new group leader whose pgid equals its pid -
-        // and then exec the shell command in place. proc.processIdentifier is
-        // therefore both the leader pid AND the pgid; killTree signals -pgid.
-        // setsid(1) does not ship on macOS, but /usr/bin/perl always does.
-        let cmd = "exec /usr/bin/perl -e 'setpgrp(0,0); exec \"/bin/bash\", \"-lc\", $ARGV[0] or die $!;' \(shellQuote(inner))"
-        proc.arguments = ["-lc", cmd]
-        if let handle = handle {
-            proc.standardOutput = handle
-            proc.standardError = handle
-        }
-        proc.terminationHandler = { [weak self] p in
-            self?.handleTermination(p)
-        }
-        do {
-            try proc.run()
-            stateQueue.sync {
-                intentionalStop = false
-                process = proc
-            }
-            return true
-        } catch {
-            NSLog("FlowState: failed to start server: \(error)")
-            return false
-        }
+        guard isAgentInstalled else { return false }
+        _ = runLaunchctl(["bootstrap", "gui/\(getuid())", plistPath])
+        _ = runLaunchctl(["kickstart", agentTarget])
+        return true
     }
 
-    /// Terminate the server child (and anything left on the port).
+    /// Stop the agent (and disable KeepAlive revival) until the next start.
     @discardableResult
     func stop() -> Bool {
-        // Atomically mark intentional + detach the process under the lock so the
-        // terminationHandler (which also reads intentionalStop) sees a consistent
-        // view and the crash-relaunch logic stays quiet.
-        let proc: Process? = stateQueue.sync {
-            intentionalStop = true
-            let p = process
-            process = nil
-            return p
+        guard isAgentInstalled else { return false }
+        _ = runLaunchctl(["bootout", agentTarget])
+        return true
+    }
+
+    /// Restart the running server in place (launchd respawns it immediately).
+    @discardableResult
+    func restart() -> Bool {
+        guard isAgentInstalled else { return false }
+        // kickstart -k of a loaded agent restarts it; if it was not loaded, fall
+        // back to a fresh bootstrap+kickstart.
+        if runLaunchctl(["kickstart", "-k", agentTarget]) != 0 {
+            return start()
         }
-        if let proc = proc, proc.isRunning {
-            let pid = proc.processIdentifier
-            killTree(pid: pid)                     // SIGTERM group, then SIGKILL
-            proc.terminate()                       // SIGTERM the bash leader too
-        }
-        killPort()                                 // belt-and-suspenders
         return true
     }
 
     @discardableResult
-    func restart() -> Bool {
-        stop()
-        // Small gap so the port frees before we rebind.
-        Thread.sleep(forTimeInterval: 0.4)
-        return start()
-    }
-
-    private func handleTermination(_ p: Process) {
-        // Runs on Foundation's own queue. Read AND mutate the crash-loop counters
-        // under stateQueue so we stay consistent with start()/stop(). `shouldRelaunch`
-        // captures the decision atomically; only the (cheap) relaunch scheduling
-        // happens outside the lock.
-        let shouldRelaunch: Bool = stateQueue.sync {
-            if intentionalStop { return false }
-            // Unexpected exit: relaunch like launchd KeepAlive, with a loop guard.
-            if Date().timeIntervalSince(relaunchWindowStart) > 60 {
-                relaunchWindowStart = Date()
-                recentRelaunches = 0
-            }
-            recentRelaunches += 1
-            guard recentRelaunches <= 5 else {
-                NSLog("FlowState: server crash-looping, not relaunching")
-                return false
-            }
-            return true
-        }
-        guard shouldRelaunch else { return }
-        NSLog("FlowState: server exited unexpectedly, relaunching")
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self = self else { return }
-            // Re-check intentionalStop under the lock - the user may have hit Stop
-            // during the 1s delay.
-            let stopped = self.stateQueue.sync { self.intentionalStop }
-            if stopped { return }
-            self.start()
+    private func runLaunchctl(_ args: [String]) -> Int32 {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        proc.arguments = args
+        proc.standardOutput = nil
+        proc.standardError = nil
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            return proc.terminationStatus
+        } catch {
+            NSLog("FlowState: launchctl \(args.first ?? "") failed: \(error)")
+            return -1
         }
     }
 
     // MARK: - stats (from /api/dashboard)
 
     /// Glanceable numbers shown in the menu.
-    struct Stats {
+    struct Stats: Sendable {
         let needsAttention: Int   // blocked tasks waiting to be unblocked
         let todayTasks: Int
         let todayMilestones: Int
@@ -181,7 +128,7 @@ final class ServerController {
         let percent: Int          // overall completion
     }
 
-    func fetchStats(completion: @escaping (Stats?) -> Void) {
+    func fetchStats(completion: @escaping @Sendable (Stats?) -> Void) {
         var req = URLRequest(url: dashboardURL.appendingPathComponent("api/dashboard"))
         req.timeoutInterval = 2.0
         req.cachePolicy = .reloadIgnoringLocalCacheData
@@ -204,7 +151,7 @@ final class ServerController {
     /// Poll the lightweight API-activity counter. Used to "blink" the icon when
     /// other clients (dashboard, agents) hit the API. Carries the monitor header
     /// so our own poll does not inflate the count.
-    func fetchPulse(completion: @escaping (Int?) -> Void) {
+    func fetchPulse(completion: @escaping @Sendable (Int?) -> Void) {
         var req = URLRequest(url: dashboardURL.appendingPathComponent("api/pulse"))
         req.timeoutInterval = 1.0
         req.cachePolicy = .reloadIgnoringLocalCacheData
@@ -233,7 +180,7 @@ final class ServerController {
     // MARK: - HTTP probe
 
     /// GET the dashboard with a short timeout. 2xx/3xx implies the server serves.
-    func probeHTTP(completion: @escaping (Bool) -> Void) {
+    func probeHTTP(completion: @escaping @Sendable (Bool) -> Void) {
         var req = URLRequest(url: dashboardURL)
         req.httpMethod = "GET"
         req.timeoutInterval = 1.5
@@ -248,63 +195,12 @@ final class ServerController {
         }.resume()
     }
 
-    /// Derive a base state: HTTP is authoritative for "serving"; a live child
-    /// that is not yet serving means "starting".
-    func refreshState(completion: @escaping (ServerState) -> Void) {
-        let alive = isProcessAlive()
+    /// Derive the base state purely from the HTTP probe (the server is an external
+    /// agent, so "serving" is the only thing we can observe). Transitional
+    /// starting/stopping is driven by the menu while a launchctl command settles.
+    func refreshState(completion: @escaping @Sendable (ServerState) -> Void) {
         probeHTTP { serving in
-            if serving {
-                completion(.running)
-            } else if alive {
-                completion(.starting)
-            } else {
-                completion(.stopped)
-            }
+            completion(serving ? .running : .stopped)
         }
-    }
-
-    // MARK: - helpers
-
-    private func ensureLogDir() {
-        let dir = (logPath as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    }
-
-    private func logHandle() -> FileHandle? {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: logPath) { fm.createFile(atPath: logPath, contents: nil) }
-        guard let h = FileHandle(forWritingAtPath: logPath) else { return nil }
-        h.seekToEndOfFile()
-        return h
-    }
-
-    /// Kill the process subtree rooted at pid (SIGTERM then SIGKILL).
-    ///
-    /// start() makes the child a process-group leader (pgid == pid via perl's
-    /// setpgrp), so signalling the negative pgid reaches the whole subtree
-    /// (bash -> npm -> next ...) in one shot. We also signal the pid directly as
-    /// a safety net, and killPort() sweeps any survivor on the port.
-    private func killTree(pid: pid_t) {
-        guard pid > 0 else { return }
-        let pgid = pid                 // child leads its own group (see start()).
-        kill(-pgid, SIGTERM)           // whole group
-        kill(pid, SIGTERM)             // and the leader, in case it is not a group leader
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) {
-            kill(-pgid, SIGKILL)
-            kill(pid, SIGKILL)
-        }
-    }
-
-    /// Kill whatever is listening on the server port (cleans up orphans).
-    private func killPort() {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
-        proc.arguments = ["-lc", "lsof -ti tcp:\(port) -sTCP:LISTEN | xargs kill -9 2>/dev/null || true"]
-        try? proc.run()
-        proc.waitUntilExit()
-    }
-
-    private func shellQuote(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
