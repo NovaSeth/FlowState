@@ -78,6 +78,29 @@ public struct FlowStateAPI: Sendable {
         try await send("POST", "/api/tasks/\(taskId)/comments", body: ["body": text, "author": author])
     }
 
+    // MARK: - Creates (mirror the web forms.tsx + lib/api.ts create* helpers).
+    // Title/name only - the server fills the rest (status, priority, position).
+
+    @discardableResult
+    public func createSolution(name: String) async throws -> Solution {
+        try await send("POST", "/api/solutions", body: ["name": name])
+    }
+
+    @discardableResult
+    public func createProject(solutionId: String, name: String) async throws -> Project {
+        try await send("POST", "/api/projects", body: ["solutionId": solutionId, "name": name])
+    }
+
+    @discardableResult
+    public func createMilestone(projectId: String, title: String) async throws -> Milestone {
+        try await send("POST", "/api/milestones", body: ["projectId": projectId, "title": title])
+    }
+
+    @discardableResult
+    public func createTask(milestoneId: String, title: String) async throws -> Task {
+        try await send("POST", "/api/tasks", body: ["milestoneId": milestoneId, "title": title])
+    }
+
     // MARK: - Internals
 
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {

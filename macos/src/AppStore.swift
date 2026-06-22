@@ -313,6 +313,65 @@ final class AppStore: ObservableObject {
         } catch { capture(error); return false }
     }
 
+    // MARK: - Creates (POST, then refetch the visible slice).
+    //
+    // Each returns true only when the server accepted the create, so the inline
+    // form can clear + collapse on success and keep the user's text on failure
+    // (same contract as addComment). The parent context (solution/project/
+    // milestone) is read from the current selection - these are only callable
+    // from a column whose parent is selected.
+
+    @MainActor
+    @discardableResult
+    func createSolution(_ name: String) async -> Bool {
+        let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        do {
+            _ = try await api.createSolution(name: value)
+            await refetchVisible()
+            return true
+        } catch { capture(error); return false }
+    }
+
+    @MainActor
+    @discardableResult
+    func createProject(_ name: String) async -> Bool {
+        guard let solutionId = selectedSolutionId else { return false }
+        let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        do {
+            _ = try await api.createProject(solutionId: solutionId, name: value)
+            await refetchVisible()
+            return true
+        } catch { capture(error); return false }
+    }
+
+    @MainActor
+    @discardableResult
+    func createMilestone(_ title: String) async -> Bool {
+        guard let projectId = selectedProjectId else { return false }
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        do {
+            _ = try await api.createMilestone(projectId: projectId, title: value)
+            await refetchVisible()
+            return true
+        } catch { capture(error); return false }
+    }
+
+    @MainActor
+    @discardableResult
+    func createTask(_ title: String) async -> Bool {
+        guard let milestoneId = selectedMilestoneId else { return false }
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        do {
+            _ = try await api.createTask(milestoneId: milestoneId, title: value)
+            await refetchVisible()
+            return true
+        } catch { capture(error); return false }
+    }
+
     // MARK: - Locale
 
     @MainActor

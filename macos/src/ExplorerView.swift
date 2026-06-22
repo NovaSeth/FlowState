@@ -35,22 +35,38 @@ struct ExplorerView: View {
 
     // MARK: - Columns
 
+    // Each column: live rows, then a collapsible "Archived" section (mirrors the
+    // web withArchivedDivider), and a create form pinned at the bottom (footer:).
+
     private var solutionsColumn: some View {
         MillerColumn(title: i18n.t("explorer.solutions"), count: store.solutions.count, collapseId: "solutions") {
             if store.solutions.isEmpty {
                 ColumnHint(text: i18n.t("explorer.noSolutions"))
             } else {
-                ForEach(store.solutions) { sol in
-                    DrillRow(
-                        title: sol.base.name, counts: sol.statusCounts, percent: sol.progress.percent,
-                        sub: i18n.t("units.projShort", ["n": "\(sol.projectCount)"]),
-                        pillKey: sol.base.status == .archived ? DS.solutionStatusLabelKey(.archived) : nil,
-                        pill: DS.solutionStatusPill(.archived),
-                        blocked: 0, active: store.selectedSolutionId == sol.id
-                    ) { _Concurrency.Task { await store.selectSolution(sol.id) } }
-                }
+                ArchivedDivider(
+                    archivedCount: store.solutions.filter { $0.base.status == .archived }.count,
+                    live: { ForEach(store.solutions.filter { $0.base.status != .archived }) { solutionRow($0) } },
+                    archived: { ForEach(store.solutions.filter { $0.base.status == .archived }) { solutionRow($0) } }
+                )
             }
+        } footer: {
+            InlineCreateForm(
+                triggerLabel: i18n.t("forms.newSolution"),
+                placeholder: i18n.t("forms.solutionNamePlaceholder")
+            ) { await store.createSolution($0) }
         }
+    }
+
+    @ViewBuilder
+    private func solutionRow(_ sol: SolutionRollup) -> some View {
+        DrillRow(
+            title: sol.base.name, counts: sol.statusCounts, percent: sol.progress.percent,
+            sub: i18n.t("units.projShort", ["n": "\(sol.projectCount)"]),
+            pillKey: sol.base.status == .archived ? DS.solutionStatusLabelKey(.archived) : nil,
+            pill: DS.solutionStatusPill(.archived),
+            blocked: 0, dimmed: sol.base.status == .archived,
+            active: store.selectedSolutionId == sol.id
+        ) { _Concurrency.Task { await store.selectSolution(sol.id) } }
     }
 
     private var projectsColumn: some View {
@@ -58,17 +74,30 @@ struct ExplorerView: View {
             if store.projects.isEmpty {
                 ColumnHint(text: i18n.t("explorer.noProjects"))
             } else {
-                ForEach(store.projects) { proj in
-                    DrillRow(
-                        title: proj.base.name, counts: proj.statusCounts, percent: proj.progress.percent,
-                        sub: i18n.t("units.milestoneShort", ["n": "\(proj.milestoneCount)"]),
-                        pillKey: DS.projectStatusLabelKey(proj.base.status),
-                        pill: DS.projectStatusPill(proj.base.status),
-                        blocked: 0, active: store.selectedProjectId == proj.id
-                    ) { _Concurrency.Task { await store.selectProject(proj.id) } }
-                }
+                ArchivedDivider(
+                    archivedCount: store.projects.filter { $0.base.status == .archived }.count,
+                    live: { ForEach(store.projects.filter { $0.base.status != .archived }) { projectRow($0) } },
+                    archived: { ForEach(store.projects.filter { $0.base.status == .archived }) { projectRow($0) } }
+                )
             }
+        } footer: {
+            InlineCreateForm(
+                triggerLabel: i18n.t("forms.newProject"),
+                placeholder: i18n.t("forms.projectNamePlaceholder")
+            ) { await store.createProject($0) }
         }
+    }
+
+    @ViewBuilder
+    private func projectRow(_ proj: ProjectRollup) -> some View {
+        DrillRow(
+            title: proj.base.name, counts: proj.statusCounts, percent: proj.progress.percent,
+            sub: i18n.t("units.milestoneShort", ["n": "\(proj.milestoneCount)"]),
+            pillKey: DS.projectStatusLabelKey(proj.base.status),
+            pill: DS.projectStatusPill(proj.base.status),
+            blocked: 0, dimmed: proj.base.status == .archived,
+            active: store.selectedProjectId == proj.id
+        ) { _Concurrency.Task { await store.selectProject(proj.id) } }
     }
 
     private var milestonesColumn: some View {
@@ -76,17 +105,30 @@ struct ExplorerView: View {
             if store.milestones.isEmpty {
                 ColumnHint(text: i18n.t("explorer.noMilestones"))
             } else {
-                ForEach(store.milestones) { ms in
-                    DrillRow(
-                        title: ms.base.title, counts: ms.statusCounts, percent: ms.progress.percent,
-                        sub: i18n.t("units.taskShort", ["n": "\(ms.progress.total)"]),
-                        pillKey: DS.projectStatusLabelKey(ms.base.status),
-                        pill: DS.projectStatusPill(ms.base.status),
-                        blocked: ms.statusCounts.blocked, active: store.selectedMilestoneId == ms.id
-                    ) { _Concurrency.Task { await store.selectMilestone(ms.id) } }
-                }
+                ArchivedDivider(
+                    archivedCount: store.milestones.filter { $0.base.status == .archived }.count,
+                    live: { ForEach(store.milestones.filter { $0.base.status != .archived }) { milestoneRow($0) } },
+                    archived: { ForEach(store.milestones.filter { $0.base.status == .archived }) { milestoneRow($0) } }
+                )
             }
+        } footer: {
+            InlineCreateForm(
+                triggerLabel: i18n.t("forms.newMilestone"),
+                placeholder: i18n.t("forms.milestoneTitlePlaceholder")
+            ) { await store.createMilestone($0) }
         }
+    }
+
+    @ViewBuilder
+    private func milestoneRow(_ ms: MilestoneRollup) -> some View {
+        DrillRow(
+            title: ms.base.title, counts: ms.statusCounts, percent: ms.progress.percent,
+            sub: i18n.t("units.taskShort", ["n": "\(ms.progress.total)"]),
+            pillKey: DS.projectStatusLabelKey(ms.base.status),
+            pill: DS.projectStatusPill(ms.base.status),
+            blocked: ms.statusCounts.blocked, dimmed: ms.base.status == .archived,
+            active: store.selectedMilestoneId == ms.id
+        ) { _Concurrency.Task { await store.selectMilestone(ms.id) } }
     }
 
     private var placeholderText: String {
@@ -98,19 +140,27 @@ struct ExplorerView: View {
 
 // MARK: - Miller column (collapsible)
 
-struct MillerColumn<Content: View>: View {
+struct MillerColumn<Content: View, Footer: View>: View {
     @Environment(\.i18n) private var i18n
     let title: String
     let count: Int
     let collapseId: String?
     private let content: Content
+    // Pinned below the scrollable body (e.g. a create form), full-width. Defaults
+    // to EmptyView via the convenience init for footer-less columns (UsersView).
+    private let footer: Footer
     @State private var collapsed: Bool
 
-    init(title: String, count: Int, collapseId: String? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        title: String, count: Int, collapseId: String? = nil,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder footer: () -> Footer
+    ) {
         self.title = title
         self.count = count
         self.collapseId = collapseId
         self.content = content()
+        self.footer = footer()
         let initial = collapseId.map { UserDefaults.standard.bool(forKey: "fs.miller.collapsed.\($0)") } ?? false
         _collapsed = State(initialValue: initial)
     }
@@ -123,6 +173,7 @@ struct MillerColumn<Content: View>: View {
                 VStack(spacing: 0) {
                     header
                     ScrollView { LazyVStack(spacing: 0) { content } }
+                    footer
                 }
                 .frame(width: 288)
             }
@@ -171,6 +222,13 @@ struct MillerColumn<Content: View>: View {
     }
 }
 
+// Footer-less columns (e.g. UsersView) keep the original call shape.
+extension MillerColumn where Footer == EmptyView {
+    init(title: String, count: Int, collapseId: String? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: title, count: count, collapseId: collapseId, content: content, footer: { EmptyView() })
+    }
+}
+
 // MARK: - Drill row (web: title row -> StatusBar -> [sub | percent], active accent-muted)
 
 struct DrillRow: View {
@@ -182,8 +240,12 @@ struct DrillRow: View {
     let pillKey: String?
     let pill: (bg: Color, fg: Color)
     let blocked: Int
+    // Archived rows render at half opacity, full on hover (web: opacity-50 hover:opacity-100).
+    var dimmed: Bool = false
     let active: Bool
     let action: () -> Void
+
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -204,6 +266,8 @@ struct DrillRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(dimmed && !hovering ? 0.5 : 1)
+        .onHover { hovering = $0 }
     }
 
     private var blockedBadge: some View {
@@ -239,6 +303,11 @@ struct TaskPaneView: View {
             } else {
                 kanbanView
             }
+            // Create form pinned at the bottom; files into the open milestone.
+            InlineCreateForm(
+                triggerLabel: i18n.t("forms.newTask"),
+                placeholder: i18n.t("forms.taskTitlePlaceholder")
+            ) { await store.createTask($0) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DS.canvas)
@@ -426,6 +495,120 @@ struct TaskCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Inline create form (web forms.tsx: AddTrigger -> text field + Add/Cancel)
+
+/// Collapsed: a dashed "+ New X" trigger pinned at the bottom of a column.
+/// Expanded: a text field with Add / Cancel. `submit` returns whether the create
+/// succeeded; on success the field clears and collapses, on failure the text is
+/// kept (same contract as the comment composer / the web useCreate hook).
+struct InlineCreateForm: View {
+    @Environment(\.i18n) private var i18n
+    let triggerLabel: String
+    let placeholder: String
+    let submit: (String) async -> Bool
+
+    @State private var open = false
+    @State private var text = ""
+    @State private var busy = false
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().frame(height: 1).foregroundStyle(DS.border)
+            content.padding(8)
+        }
+        .background(DS.canvas)
+    }
+
+    @ViewBuilder private var content: some View {
+        if open {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { trigger() }
+                HStack(spacing: 8) {
+                    Button(i18n.t("forms.add")) { trigger() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(busy || trimmed.isEmpty)
+                    Button(i18n.t("forms.cancel")) { reset() }
+                        .buttonStyle(.bordered)
+                        .disabled(busy)
+                }
+            }
+        } else {
+            Button { open = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus").font(.system(size: 12))
+                    Text(triggerLabel).font(.system(size: 13))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(DS.fgMuted)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(DS.border, style: StrokeStyle(lineWidth: 1, dash: [4]))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // Mirrors the comment-send pattern: state mutated inside a Task that inherits
+    // the main actor (SwiftUI View bodies are @MainActor under Swift 6).
+    private func trigger() {
+        guard !trimmed.isEmpty, !busy else { return }
+        let value = trimmed
+        busy = true
+        _Concurrency.Task {
+            let ok = await submit(value)
+            busy = false
+            if ok { reset() }
+        }
+    }
+
+    private func reset() {
+        text = ""
+        open = false
+    }
+}
+
+// MARK: - Archived divider (web miller.tsx withArchivedDivider)
+
+/// Renders live rows, then - when there are archived items - a collapsible
+/// "Archived" header (collapsed by default) with a count, revealing the archived
+/// rows when expanded.
+struct ArchivedDivider<Live: View, Archived: View>: View {
+    @Environment(\.i18n) private var i18n
+    let archivedCount: Int
+    @ViewBuilder let live: () -> Live
+    @ViewBuilder let archived: () -> Archived
+
+    @State private var open = false
+
+    var body: some View {
+        live()
+        if archivedCount > 0 {
+            Button { open.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11)).foregroundStyle(DS.fgSubtle)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Eyebrow(text: i18n.t("common.archived"))
+                    CountPill(count: archivedCount)
+                    Rectangle().frame(height: 1).foregroundStyle(DS.border)
+                }
+                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open { archived() }
+        }
     }
 }
 

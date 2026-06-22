@@ -29,7 +29,12 @@ import {
   TaskMeta,
 } from "./ui";
 import { DeleteButton } from "./DeleteButton";
-import { NewSolutionForm } from "./forms";
+import {
+  NewMilestoneForm,
+  NewProjectForm,
+  NewSolutionForm,
+  NewTaskForm,
+} from "./forms";
 import { TaskPanel } from "./TaskPanel";
 import { Pulse } from "./Pulse";
 import { AnimatedNumber } from "./AnimatedNumber";
@@ -293,7 +298,7 @@ export function Explorer({
     </div>
   );
 
-  const projectsCol = loadingProjects ? (
+  const projectsList = loadingProjects ? (
     <ColLoading />
   ) : projects.length === 0 ? (
     <ColHint text={t("explorer.noProjects")} />
@@ -335,7 +340,23 @@ export function Explorer({
     )
   );
 
-  const milestonesCol = loadingMilestones ? (
+  // Same shape as solutionsCol: scrollable list + a create form pinned at the
+  // bottom (solId is always set when this column is visible).
+  const projectsCol = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">{projectsList}</div>
+      {solId && (
+        <div className="shrink-0 border-t border-edge bg-canvas p-2">
+          <NewProjectForm
+            solutionId={solId}
+            onDone={() => loadProjects(solId)}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  const milestonesList = loadingMilestones ? (
     <ColLoading />
   ) : milestones.length === 0 ? (
     <ColHint text={t("explorer.noMilestones")} />
@@ -376,6 +397,22 @@ export function Explorer({
         />
       ),
     )
+  );
+
+  // Scrollable list + a create form pinned at the bottom (projId is always set
+  // when this column is visible).
+  const milestonesCol = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">{milestonesList}</div>
+      {projId && (
+        <div className="shrink-0 border-t border-edge bg-canvas p-2">
+          <NewMilestoneForm
+            projectId={projId}
+            onDone={() => loadMilestones(projId)}
+          />
+        </div>
+      )}
+    </div>
   );
 
   const tasksPaneInner = (
@@ -435,6 +472,17 @@ export function Explorer({
           resetKey={msId ?? ""}
         />
       )}
+      {msId && (
+        <div className="shrink-0 border-t border-edge bg-canvas p-2">
+          {/* Defaults to the open milestone; the dropdown still lets you file
+              the task under any milestone of this project. */}
+          <NewTaskForm
+            milestones={milestones.map((m) => ({ id: m.id, title: m.title }))}
+            defaultMilestoneId={msId}
+            onDone={() => loadTasks(msId)}
+          />
+        </div>
+      )}
     </>
   );
 
@@ -483,7 +531,9 @@ export function Explorer({
           {solutionsCol}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto bg-canvas pb-2">
+        // projectsCol / milestonesCol manage their own scroll and pin the create
+        // form at the bottom (same shape as solutionsCol).
+        <div className="flex min-h-0 flex-1 flex-col bg-canvas">
           {level === 1 ? projectsCol : milestonesCol}
         </div>
       );
@@ -521,7 +571,6 @@ export function Explorer({
           <Column
             title={t("explorer.projects")}
             count={projects.length}
-            scroll
             collapseId="projects"
           >
             {projectsCol}
@@ -532,7 +581,6 @@ export function Explorer({
           <Column
             title={t("explorer.milestones")}
             count={milestones.length}
-            scroll
             collapseId="milestones"
           >
             {milestonesCol}
