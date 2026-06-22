@@ -749,9 +749,16 @@ function KanbanBoard({
                     onClick={() => onSelect(t.id)}
                     className="bg-canvas-subtle"
                   >
-                    <span className="line-clamp-3 text-sm leading-snug text-fg">
+                    <span className="line-clamp-2 text-sm leading-snug text-fg">
                       {t.title}
                     </span>
+                    {t.description.trim() !== "" && (
+                      // Short context under the title: clamped to exactly two lines
+                      // (cut mid-word if needed) so every card stays the same shape.
+                      <span className="line-clamp-2 text-xs leading-snug text-fg-muted">
+                        {t.description}
+                      </span>
+                    )}
                     <TaskMeta
                       labels={t.labels}
                       childCount={t.childCount}

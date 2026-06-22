@@ -21,6 +21,9 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Added
 
+- Kanban task cards now show a short, two-line task description under the title
+  (clamped to two lines, cut mid-word if needed), on both the web dashboard and
+  the native macOS app. Cards without a description render the title alone.
 - Standard community files: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
   issue/PR templates, `.env.example`, and this changelog.
 - Prettier tooling (`format` / `format:check` scripts) and an `.nvmrc`.

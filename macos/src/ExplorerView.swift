@@ -479,7 +479,13 @@ struct TaskCardView: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(item.base.title).font(.system(size: 13)).foregroundStyle(DS.fg)
-                    .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                // Short context under the title: clamped to two lines (tail-truncated)
+                // so every card keeps the same shape, mirroring the web line-clamp-2.
+                if !item.base.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(item.base.description).font(.system(size: 12)).foregroundStyle(DS.fgMuted)
+                        .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                }
                 TaskMeta(labels: item.base.labels, childCount: item.childCount,
                          childDoneCount: item.childDoneCount, openBlockerCount: item.openBlockerCount)
                 if item.base.priority != .none {
