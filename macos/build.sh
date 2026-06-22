@@ -13,7 +13,7 @@ BIN="$MACOS_DIR/FlowState"
 # UI version, shared scheme with the web (vMAJOR.MINOR, +1 MINOR per UI commit;
 # kept in lockstep with UI_VERSION in src/components/NavRail.tsx). The native rail
 # shows this via CFBundleShortVersionString.
-VERSION="1.38"
+VERSION="1.39"
 ARCH="$(uname -m)"          # arm64 or x86_64
 MIN_MACOS="13.0"
 

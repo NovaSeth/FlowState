@@ -21,6 +21,12 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Added
 
+- The single-project page (`/projects/[id]`) gained a **Dashboard | Columns**
+  view toggle. "Columns" is the Explorer's Miller cascade scoped to the project
+  (Milestones → Tasks → detail), reusing the shared column primitives and the
+  inline create forms (new milestone / new task pinned at the bottom of each
+  column). The existing dashboard layout (milestone cards + status board) stays
+  the default. The native macOS app already offers this via its Explorer.
 - Kanban task cards now show a short, two-line task description under the title
   (clamped to two lines, cut mid-word if needed), on both the web dashboard and
   the native macOS app. Cards without a description render the title alone.

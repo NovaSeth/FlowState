@@ -134,7 +134,9 @@
     "milestones": "Milestones",
     "tasks": "Tasks",
     "showTasks": "show tasks",
-    "all": "All"
+    "all": "All",
+    "viewDashboard": "Dashboard",
+    "viewColumns": "Columns"
   },
   "task": {
     "eyebrow": "Task",

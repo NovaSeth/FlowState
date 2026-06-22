@@ -134,7 +134,9 @@
     "milestones": "Kamienie milowe",
     "tasks": "Zadania",
     "showTasks": "pokaz zadania",
-    "all": "Wszystkie"
+    "all": "Wszystkie",
+    "viewDashboard": "Dashboard",
+    "viewColumns": "Kolumny"
   },
   "task": {
     "eyebrow": "Zadanie",

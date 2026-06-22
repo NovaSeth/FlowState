@@ -9,7 +9,7 @@ import { useT } from "@/i18n/provider";
 // (1.01, 1.02, ...), MAJOR jumps when we turn the concept upside down
 // (-> 2.00). Bump it on every commit that touches the UI.
 // Shared with the native macOS app (CFBundleShortVersionString in macos/build.sh).
-const UI_VERSION = "1.38";
+const UI_VERSION = "1.39";
 
 // Main menu (sidebar). Order from the top: Overview, Explorer, Users, Settings.
 // labelKey is resolved through i18n at render time (not a literal, so it stays multilingual).
