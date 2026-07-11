@@ -1,0 +1,46 @@
+[
+  {
+    "id": "key_grantsProjSol",
+    "actorId": "ac_jU19atYm34fR",
+    "solutionId": null,
+    "name": "web-builder (project + solution grants)",
+    "prefix": "fsk_daef6901",
+    "scope": "write",
+    "grants": [
+      { "projectId": "pr_dashboard01", "scope": "write" },
+      { "solutionId": "so_hal9000kbase", "scope": "read" }
+    ],
+    "expiresAt": "2026-07-06T22:50:03.900Z",
+    "createdByKeyId": "key_c_fU7Qd1Tp_n",
+    "lastUsedAt": null,
+    "revokedAt": null,
+    "createdAt": "2026-07-06T19:50:03.903Z"
+  },
+  {
+    "id": "key_grantsGlobal",
+    "actorId": "ac_9XDJiydiyKvs",
+    "solutionId": null,
+    "name": "",
+    "prefix": "fsk_5f0d242d",
+    "scope": "write",
+    "grants": [{ "scope": "write" }],
+    "expiresAt": null,
+    "createdByKeyId": null,
+    "lastUsedAt": "2026-06-26T14:08:17.518Z",
+    "revokedAt": null,
+    "createdAt": "2026-06-26T12:33:55.756Z"
+  },
+  {
+    "id": "key_legacyNoGrants",
+    "actorId": "ac_boKSlmeifORB",
+    "solutionId": "so_hal9000kbase",
+    "name": "",
+    "prefix": "fsk_23349146",
+    "scope": "write",
+    "expiresAt": null,
+    "createdByKeyId": null,
+    "lastUsedAt": "2026-06-23T05:35:01.127Z",
+    "revokedAt": null,
+    "createdAt": "2026-06-22T21:53:06.529Z"
+  }
+]

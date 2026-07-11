@@ -28,6 +28,12 @@ public struct FlowStateAPI: Sendable {
         try await get("/api/projects", query: ["solutionId": solutionId])
     }
 
+    /// All projects across every solution (no filter) - the Users screen uses
+    /// this to resolve project names in key-grant labels.
+    public func projects() async throws -> [ProjectRollup] {
+        try await get("/api/projects")
+    }
+
     public func milestones(projectId: String) async throws -> [MilestoneRollup] {
         try await get("/api/milestones", query: ["projectId": projectId])
     }

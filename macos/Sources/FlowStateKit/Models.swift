@@ -162,19 +162,69 @@ public struct Actor: Codable, Identifiable, Sendable {
     public let createdAt: String
 }
 
+/// One access grant on an API key: a target plus the rights on it. Target:
+/// `projectId` = one project; `solutionId` = a whole solution; neither = global.
+/// Never both on one grant. Absent target keys may be omitted or null in JSON.
+public struct KeyGrant: Codable, Sendable {
+    public let solutionId: String?
+    public let projectId: String?
+    public let scope: KeyScope
+
+    public init(solutionId: String? = nil, projectId: String? = nil, scope: KeyScope) {
+        self.solutionId = solutionId
+        self.projectId = projectId
+        self.scope = scope
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        solutionId = try c.decodeIfPresent(String.self, forKey: .solutionId)
+        projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
+        scope = try c.decode(KeyScope.self, forKey: .scope)
+    }
+}
+
 /// API key without the secret (the secret is only returned on creation).
 public struct ApiKey: Codable, Identifiable, Sendable {
     public let id: String
     public let actorId: String
+    /// Legacy single-solution target, derived from `grants` on the server (the
+    /// single solution target when there is exactly one, else null).
     public let solutionId: String?
     public let name: String
     public let prefix: String
+    /// Legacy aggregate scope: "write" when any grant can write, else "read".
     public let scope: KeyScope
+    /// The key's access grants - the source of truth. Always present in fresh
+    /// server payloads; a missing/empty list (legacy payloads or old fixtures)
+    /// falls back to one grant derived from solutionId+scope, like the server.
+    public let grants: [KeyGrant]
     public let expiresAt: String?
     public let createdByKeyId: String?
     public let lastUsedAt: String?
     public let revokedAt: String?
     public let createdAt: String
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        actorId = try c.decode(String.self, forKey: .actorId)
+        solutionId = try c.decodeIfPresent(String.self, forKey: .solutionId)
+        name = try c.decode(String.self, forKey: .name)
+        prefix = try c.decode(String.self, forKey: .prefix)
+        scope = try c.decode(KeyScope.self, forKey: .scope)
+        expiresAt = try c.decodeIfPresent(String.self, forKey: .expiresAt)
+        createdByKeyId = try c.decodeIfPresent(String.self, forKey: .createdByKeyId)
+        lastUsedAt = try c.decodeIfPresent(String.self, forKey: .lastUsedAt)
+        revokedAt = try c.decodeIfPresent(String.self, forKey: .revokedAt)
+        createdAt = try c.decode(String.self, forKey: .createdAt)
+        let decoded = try c.decodeIfPresent([KeyGrant].self, forKey: .grants)
+        if let decoded, !decoded.isEmpty {
+            grants = decoded
+        } else {
+            grants = [KeyGrant(solutionId: solutionId, scope: scope)]
+        }
+    }
 }
 
 public struct Activity: Codable, Identifiable, Sendable {

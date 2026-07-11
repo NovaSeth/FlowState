@@ -68,4 +68,30 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(a.isEmpty)
         XCTAssertFalse(a[0].name.isEmpty)
     }
+
+    func testDecodeKeysWithGrants() throws {
+        let keys = try decode([ApiKey].self, "keys")
+        XCTAssertEqual(keys.count, 3)
+
+        // grants present: decoded verbatim (the source of truth).
+        XCTAssertEqual(keys[0].grants.count, 2)
+        XCTAssertEqual(keys[0].grants[0].projectId, "pr_dashboard01")
+        XCTAssertNil(keys[0].grants[0].solutionId)
+        XCTAssertEqual(keys[0].grants[0].scope, .write)
+        XCTAssertEqual(keys[0].grants[1].solutionId, "so_hal9000kbase")
+        XCTAssertNil(keys[0].grants[1].projectId)
+        XCTAssertEqual(keys[0].grants[1].scope, .read)
+
+        // Global grant: neither target id set.
+        XCTAssertEqual(keys[1].grants.count, 1)
+        XCTAssertNil(keys[1].grants[0].solutionId)
+        XCTAssertNil(keys[1].grants[0].projectId)
+
+        // Legacy payload without `grants`: falls back to a single grant derived
+        // from the top-level solutionId+scope, like the server does.
+        XCTAssertEqual(keys[2].grants.count, 1)
+        XCTAssertEqual(keys[2].grants[0].solutionId, "so_hal9000kbase")
+        XCTAssertNil(keys[2].grants[0].projectId)
+        XCTAssertEqual(keys[2].grants[0].scope, .write)
+    }
 }

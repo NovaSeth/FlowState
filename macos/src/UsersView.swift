@@ -63,7 +63,8 @@ struct UsersView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(keys) { key in
-                            KeyRow(apiKey: key, solutionName: solutionName(key.solutionId),
+                            KeyRow(apiKey: key,
+                                   grantsLine: grantLabels(key).joined(separator: " · "),
                                    active: store.selectedKeyId == key.id) {
                                 _Concurrency.Task { await store.selectKey(key.id) }
                             }
@@ -80,7 +81,7 @@ struct UsersView: View {
     }
 
     private func keyPane(_ key: ApiKey) -> some View {
-        KeyPaneView(apiKey: key, solutionName: solutionName(key.solutionId),
+        KeyPaneView(apiKey: key, grantLabels: grantLabels(key),
                     mintedCount: store.apiKeys.filter { $0.createdByKeyId == key.id }.count,
                     activity: store.keyActivity, actors: store.actors)
             .frame(width: 384)
@@ -89,10 +90,21 @@ struct UsersView: View {
             .overlay(Rectangle().frame(width: 1).foregroundStyle(DS.border), alignment: .trailing)
     }
 
-    private func solutionName(_ id: String?) -> String {
-        guard let id else { return i18n.t("users.globalScope") }
-        return store.solutions.first { $0.id == id }?.base.name ?? id
+    // Human summary of one grant: target name + rights, e.g. "Zelda: write"
+    // (web UsersExplorer grantLabel). Unknown ids fall back to the raw id.
+    private func grantLabel(_ grant: KeyGrant) -> String {
+        let name: String
+        if let projectId = grant.projectId {
+            name = store.allProjects.first { $0.id == projectId }?.base.name ?? projectId
+        } else if let solutionId = grant.solutionId {
+            name = store.solutions.first { $0.id == solutionId }?.base.name ?? solutionId
+        } else {
+            name = i18n.t("users.grantGlobal")
+        }
+        return "\(name): \(grant.scope.rawValue)"
     }
+
+    private func grantLabels(_ key: ApiKey) -> [String] { key.grants.map(grantLabel) }
 }
 
 private struct ActorRow: View {
@@ -125,7 +137,8 @@ private struct ActorRow: View {
 private struct KeyRow: View {
     @Environment(\.i18n) private var i18n
     let apiKey: ApiKey
-    let solutionName: String
+    /// Human summary of the key's grants, e.g. "Zelda: write · global: read".
+    let grantsLine: String
     let active: Bool
     let action: () -> Void
 
@@ -149,7 +162,7 @@ private struct KeyRow: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    Text(solutionName).font(.system(size: 11)).foregroundStyle(DS.fgSubtle)
+                    Text(grantsLine).font(.system(size: 11)).foregroundStyle(DS.fgSubtle).lineLimit(1)
                     if let exp = apiKey.expiresAt {
                         Text(expired ? i18n.t("users.expired") : i18n.t("users.expiresAt", ["when": formatTimestamp(exp)]))
                             .font(.system(size: 11)).foregroundStyle(expired ? DS.danger : DS.fgSubtle)
@@ -174,7 +187,8 @@ private struct KeyRow: View {
 private struct KeyPaneView: View {
     @Environment(\.i18n) private var i18n
     let apiKey: ApiKey
-    let solutionName: String
+    /// Human summaries of the key's grants (one entry per grant).
+    let grantLabels: [String]
     let mintedCount: Int
     let activity: [Activity]
     let actors: [Actor]
@@ -214,10 +228,12 @@ private struct KeyPaneView: View {
 
     private var detailRows: some View {
         let expired = apiKey.expiresAt.map { $0 <= DateUtil.isoFractional.string(from: Date()) } ?? false
+        // The Access row lists every grant on its own line (web KeyDetails:
+        // a right-aligned column of grant labels).
         let rows: [(String, String)] = [
             (i18n.t("users.keyPrefix"), apiKey.prefix),
             (i18n.t("users.permissions"), apiKey.scope.rawValue),
-            (i18n.t("users.solutionScope"), solutionName),
+            (i18n.t("users.grants"), grantLabels.joined(separator: "\n")),
             (i18n.t("users.keyExpiry"), apiKey.expiresAt.map { expired ? i18n.t("users.expired") : formatTimestamp($0) } ?? i18n.t("users.noExpiry")),
             (i18n.t("users.keyLastUsed"), apiKey.lastUsedAt.map { formatTimestamp($0) } ?? i18n.t("users.neverUsed")),
             (i18n.t("users.keyCreatedAt"), formatTimestamp(apiKey.createdAt)),
@@ -229,7 +245,8 @@ private struct KeyPaneView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(label).font(.system(size: 13)).foregroundStyle(DS.fgSubtle)
                     Spacer(minLength: 12)
-                    Text(value).font(.system(size: 13)).foregroundStyle(DS.fg).multilineTextAlignment(.trailing).lineLimit(1)
+                    // Multi-line so the grants column can stack; still trailing-aligned.
+                    Text(value).font(.system(size: 13)).foregroundStyle(DS.fg).multilineTextAlignment(.trailing)
                 }
                 .padding(.bottom, 8)
                 .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)

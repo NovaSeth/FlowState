@@ -52,6 +52,9 @@ final class AppStore: ObservableObject {
     // Users (actors / keys / activity).
     @Published private(set) var actors: [Actor] = []
     @Published private(set) var apiKeys: [ApiKey] = []
+    /// All projects (unfiltered) - resolves project names in key-grant labels
+    /// on the Users screen; loaded together with actors/keys.
+    @Published private(set) var allProjects: [ProjectRollup] = []
     @Published private(set) var keyActivity: [Activity] = []
     @Published private(set) var selectedActorId: String?
     @Published private(set) var selectedKeyId: String?
@@ -285,6 +288,7 @@ final class AppStore: ObservableObject {
     func loadUsers() async {
         do { actors = try await api.actors() } catch { capture(error) }
         do { apiKeys = try await api.keys() } catch { capture(error) }
+        do { allProjects = try await api.projects() } catch { capture(error) }
     }
 
     @MainActor
