@@ -36,6 +36,12 @@ public struct FlowStateAPI: Sendable {
         try await get("/api/tasks", query: ["milestoneId": milestoneId])
     }
 
+    /// Every task in a project (across milestones) - feeds the project dashboard
+    /// view's milestone cards + status board.
+    public func tasks(projectId: String) async throws -> [TaskListItem] {
+        try await get("/api/tasks", query: ["projectId": projectId])
+    }
+
     public func taskDetail(id: String) async throws -> TaskDetail {
         try await get("/api/tasks/\(id)", query: ["expand": "comments"])
     }
@@ -101,6 +107,57 @@ public struct FlowStateAPI: Sendable {
         try await send("POST", "/api/tasks", body: ["milestoneId": milestoneId, "title": title])
     }
 
+    // MARK: - Updates (PATCH, partial body - only the provided fields are sent),
+    // mirroring the web lib/api.ts update* helpers used by the row kebab menu.
+
+    @discardableResult
+    public func updateSolution(
+        id: String, name: String? = nil, description: String? = nil,
+        color: String? = nil, status: SolutionStatus? = nil
+    ) async throws -> Solution {
+        var body: [String: Any] = [:]
+        if let name { body["name"] = name }
+        if let description { body["description"] = description }
+        if let color { body["color"] = color }
+        if let status { body["status"] = status.rawValue }
+        return try await send("PATCH", "/api/solutions/\(id)", body: body)
+    }
+
+    @discardableResult
+    public func updateProject(
+        id: String, name: String? = nil, description: String? = nil,
+        status: ProjectStatus? = nil
+    ) async throws -> Project {
+        var body: [String: Any] = [:]
+        if let name { body["name"] = name }
+        if let description { body["description"] = description }
+        if let status { body["status"] = status.rawValue }
+        return try await send("PATCH", "/api/projects/\(id)", body: body)
+    }
+
+    /// `outcome` is a double optional: omit it (default) to leave the outcome
+    /// untouched, pass `.some(nil)` to clear it (JSON null), or a value to set it.
+    @discardableResult
+    public func updateMilestone(
+        id: String, title: String? = nil, description: String? = nil,
+        status: MilestoneStatus? = nil, outcome: MilestoneOutcome?? = nil
+    ) async throws -> Milestone {
+        var body: [String: Any] = [:]
+        if let title { body["title"] = title }
+        if let description { body["description"] = description }
+        if let status { body["status"] = status.rawValue }
+        if let outcome {
+            if let value = outcome { body["outcome"] = value.rawValue } else { body["outcome"] = NSNull() }
+        }
+        return try await send("PATCH", "/api/milestones/\(id)", body: body)
+    }
+
+    // MARK: - Deletes (the server answers 204 No Content).
+
+    public func deleteSolution(id: String) async throws { try await delete("/api/solutions/\(id)") }
+    public func deleteProject(id: String) async throws { try await delete("/api/projects/\(id)") }
+    public func deleteMilestone(id: String) async throws { try await delete("/api/milestones/\(id)") }
+
     // MARK: - Internals
 
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
@@ -116,6 +173,18 @@ public struct FlowStateAPI: Sendable {
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await run(req)
+    }
+
+    /// DELETE with no decodable response body (204 No Content on success).
+    private func delete(_ path: String) async throws {
+        var req = URLRequest(url: makeURL(path, [:]))
+        req.httpMethod = "DELETE"
+        req.setValue("1", forHTTPHeaderField: "x-fs-dashboard")
+        let (data, resp) = try await session.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw APIError(status: status, body: String(data: data, encoding: .utf8) ?? "")
+        }
     }
 
     private func run<T: Decodable>(_ req: URLRequest) async throws -> T {

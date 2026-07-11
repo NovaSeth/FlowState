@@ -148,25 +148,6 @@ final class ServerController: @unchecked Sendable {
         }.resume()
     }
 
-    /// Poll the lightweight API-activity counter. Used to "blink" the icon when
-    /// other clients (dashboard, agents) hit the API. Carries the monitor header
-    /// so our own poll does not inflate the count.
-    func fetchPulse(completion: @escaping @Sendable (Int?) -> Void) {
-        var req = URLRequest(url: dashboardURL.appendingPathComponent("api/pulse"))
-        req.timeoutInterval = 1.0
-        req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.setValue("1", forHTTPHeaderField: "x-fs-monitor")
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            guard let data = data,
-                  let dto = try? JSONDecoder().decode(PulseDTO.self, from: data) else {
-                completion(nil); return
-            }
-            completion(dto.count)
-        }.resume()
-    }
-
-    private struct PulseDTO: Decodable { let count: Int }
-
     // Minimal decode of just the fields we surface.
     private struct DashboardDTO: Decodable {
         struct StatusCounts: Decodable { let blocked: Int }

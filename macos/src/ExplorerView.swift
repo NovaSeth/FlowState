@@ -13,9 +13,8 @@ struct ExplorerView: View {
         HStack(alignment: .top, spacing: 0) {
             solutionsColumn
             if store.selectedSolutionId != nil { projectsColumn }
-            if store.selectedProjectId != nil { milestonesColumn }
-            if store.selectedMilestoneId != nil {
-                TaskPaneView().frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+            if store.selectedProjectId != nil {
+                projectRegion
             } else {
                 ColumnPlaceholder(text: placeholderText)
             }
@@ -27,6 +26,47 @@ struct ExplorerView: View {
                     .id(store.selectedTaskId)
                     .frame(width: 380)
                     .overlay(Rectangle().frame(width: 1).foregroundStyle(DS.border), alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DS.canvas)
+    }
+
+    // MARK: - Project region (Dashboard | Columns, web ProjectView parity)
+
+    // Everything right of the Projects column once a project is selected: a slim
+    // bar with the segmented Dashboard | Columns toggle (web ViewToggle), then
+    // either the project dashboard or the classic Miller cascade (Milestones
+    // column -> task pane).
+    private var projectRegion: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                ProjectViewToggle(mode: $store.projectViewMode)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)
+
+            if store.projectViewMode == .dashboard {
+                if let project = store.projects.first(where: { $0.id == store.selectedProjectId }) {
+                    ProjectDashboardView(project: project)
+                        // Remount per project so the board's milestone filter
+                        // resets (the web re-mounts ProjectView on navigation).
+                        .id(project.id)
+                } else {
+                    // Rollup not in the loaded list yet (mid-refetch).
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    milestonesColumn
+                    if store.selectedMilestoneId != nil {
+                        TaskPaneView().frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ColumnPlaceholder(text: i18n.t("explorer.pickMilestone"))
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -65,8 +105,32 @@ struct ExplorerView: View {
             pillKey: sol.base.status == .archived ? DS.solutionStatusLabelKey(.archived) : nil,
             pill: DS.solutionStatusPill(.archived),
             blocked: 0, dimmed: sol.base.status == .archived,
+            menu: solutionMenu(sol),
             active: store.selectedSolutionId == sol.id
         ) { _Concurrency.Task { await store.selectSolution(sol.id) } }
+    }
+
+    private func solutionMenu(_ sol: SolutionRollup) -> EntityMenuModel {
+        let store = self.store
+        return EntityMenuModel(
+            editTitle: i18n.t("entity.editSolution"),
+            name: sol.base.name,
+            description: sol.base.description,
+            color: sol.base.color.isEmpty ? "#0969da" : sol.base.color,
+            status: sol.base.status.rawValue,
+            statusOptions: SolutionStatus.allCases.map {
+                EntityOption(value: $0.rawValue, labelKey: DS.solutionStatusLabelKey($0))
+            },
+            outcome: nil, outcomeOptions: nil,
+            saveDetails: { name, description, color in
+                try await store.updateSolution(sol.id, name: name, description: description, color: color)
+            },
+            setStatus: { raw in
+                try await store.updateSolution(sol.id, status: SolutionStatus(rawValue: raw))
+            },
+            setOutcome: nil,
+            delete: { try await store.deleteSolution(sol.id) }
+        )
     }
 
     private var projectsColumn: some View {
@@ -96,8 +160,32 @@ struct ExplorerView: View {
             pillKey: DS.projectStatusLabelKey(proj.base.status),
             pill: DS.projectStatusPill(proj.base.status),
             blocked: 0, dimmed: proj.base.status == .archived,
+            menu: projectMenu(proj),
             active: store.selectedProjectId == proj.id
         ) { _Concurrency.Task { await store.selectProject(proj.id) } }
+    }
+
+    private func projectMenu(_ proj: ProjectRollup) -> EntityMenuModel {
+        let store = self.store
+        return EntityMenuModel(
+            editTitle: i18n.t("entity.editProject"),
+            name: proj.base.name,
+            description: proj.base.description,
+            color: nil,
+            status: proj.base.status.rawValue,
+            statusOptions: ProjectStatus.allCases.map {
+                EntityOption(value: $0.rawValue, labelKey: DS.projectStatusLabelKey($0))
+            },
+            outcome: nil, outcomeOptions: nil,
+            saveDetails: { name, description, _ in
+                try await store.updateProject(proj.id, name: name, description: description)
+            },
+            setStatus: { raw in
+                try await store.updateProject(proj.id, status: ProjectStatus(rawValue: raw))
+            },
+            setOutcome: nil,
+            delete: { try await store.deleteProject(proj.id) }
+        )
     }
 
     private var milestonesColumn: some View {
@@ -127,14 +215,44 @@ struct ExplorerView: View {
             pillKey: DS.projectStatusLabelKey(ms.base.status),
             pill: DS.projectStatusPill(ms.base.status),
             blocked: ms.statusCounts.blocked, dimmed: ms.base.status == .archived,
+            menu: milestoneMenu(ms),
             active: store.selectedMilestoneId == ms.id
         ) { _Concurrency.Task { await store.selectMilestone(ms.id) } }
     }
 
+    private func milestoneMenu(_ ms: MilestoneRollup) -> EntityMenuModel {
+        let store = self.store
+        return EntityMenuModel(
+            editTitle: i18n.t("entity.editMilestone"),
+            name: ms.base.title,
+            description: ms.base.description,
+            color: nil,
+            status: ms.base.status.rawValue,
+            statusOptions: MilestoneStatus.allCases.map {
+                EntityOption(value: $0.rawValue, labelKey: DS.projectStatusLabelKey($0))
+            },
+            outcome: ms.base.outcome?.rawValue,
+            outcomeOptions: MilestoneOutcome.allCases.map {
+                EntityOption(value: $0.rawValue, labelKey: DS.outcomeLabelKey($0))
+            },
+            saveDetails: { name, description, _ in
+                // The edit form's "name" is the milestone's title on the API.
+                try await store.updateMilestone(ms.id, title: name, description: description)
+            },
+            setStatus: { raw in
+                try await store.updateMilestone(ms.id, status: MilestoneStatus(rawValue: raw))
+            },
+            setOutcome: { raw in
+                // nil clears the outcome (PATCH outcome: null), like the web "None".
+                try await store.updateMilestone(ms.id, outcome: .some(raw.flatMap(MilestoneOutcome.init(rawValue:))))
+            },
+            delete: { try await store.deleteMilestone(ms.id) }
+        )
+    }
+
     private var placeholderText: String {
         if store.selectedSolutionId == nil { return i18n.t("explorer.pickSolution") }
-        if store.selectedProjectId == nil { return i18n.t("explorer.pickProject") }
-        return i18n.t("explorer.pickMilestone")
+        return i18n.t("explorer.pickProject")
     }
 }
 
@@ -242,12 +360,21 @@ struct DrillRow: View {
     let blocked: Int
     // Archived rows render at half opacity, full on hover (web: opacity-50 hover:opacity-100).
     var dimmed: Bool = false
+    // Row actions (edit / status / delete): hover-revealed kebab + context menu.
+    var menu: EntityMenuModel? = nil
     let active: Bool
     let action: () -> Void
 
     @State private var hovering = false
 
     var body: some View {
+        rowButton
+            .entityMenu(menu, revealed: hovering)
+            .opacity(dimmed && !hovering ? 0.5 : 1)
+            .onHover { hovering = $0 }
+    }
+
+    private var rowButton: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title).font(.system(size: 13)).foregroundStyle(DS.fg).lineLimit(1)
@@ -266,8 +393,6 @@ struct DrillRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .opacity(dimmed && !hovering ? 0.5 : 1)
-        .onHover { hovering = $0 }
     }
 
     private var blockedBadge: some View {

@@ -17,7 +17,8 @@ type IconName =
   | "clock"
   | "check"
   | "trash"
-  | "block";
+  | "block"
+  | "kebab";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   overview: (
@@ -127,6 +128,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="m5.6 5.6 12.8 12.8" />
+    </>
+  ),
+  // Vertical ellipsis - the per-row actions ("kebab") menu trigger.
+  kebab: (
+    <>
+      <circle cx="12" cy="5" r="0.9" />
+      <circle cx="12" cy="12" r="0.9" />
+      <circle cx="12" cy="19" r="0.9" />
     </>
   ),
 };

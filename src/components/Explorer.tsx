@@ -2,16 +2,25 @@
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
+  MILESTONE_OUTCOMES,
+  MILESTONE_STATUSES,
+  MilestoneOutcome,
   MilestoneRollup,
+  MilestoneStatus,
+  PROJECT_STATUSES,
   ProjectRollup,
+  SOLUTION_STATUSES,
   SolutionRollup,
   StatusCounts,
   TaskListItem,
   TaskPriority,
   TaskStatus,
+  UpdateProjectInput,
+  UpdateSolutionInput,
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import {
+  MILESTONE_OUTCOME_META,
   MILESTONE_STATUS_META,
   PROJECT_STATUS_META,
   SOLUTION_STATUS_META,
@@ -28,7 +37,7 @@ import {
   TaskCard,
   TaskMeta,
 } from "./ui";
-import { DeleteButton } from "./DeleteButton";
+import { EntityMenu } from "./EntityMenu";
 import {
   NewMilestoneForm,
   NewProjectForm,
@@ -75,6 +84,13 @@ const byPriority = (a: TaskListItem, b: TaskListItem) =>
   PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
 const byStatusThenPriority = (a: TaskListItem, b: TaskListItem) =>
   STATUS_RANK[a.status] - STATUS_RANK[b.status] || byPriority(a, b);
+
+// Localized {value, label} options for the kebab-menu status/outcome pickers.
+const optionsFrom = <V extends string>(
+  values: readonly V[],
+  meta: Record<V, { labelKey: string }>,
+  t: (key: string) => string,
+) => values.map((v) => ({ value: v, label: t(meta[v].labelKey) }));
 
 // FLIP signature for a task list: one segment per task capturing exactly the keys
 // that should drive a re-sort / re-layout (id + status + priority).
@@ -273,16 +289,34 @@ export function Explorer({
                 )}
               </span>
             }
-            onDelete={() => api.deleteSolution(s.id)}
-            onDeleted={() => {
-              if (solId === s.id) {
-                setSolId(null);
-                setProjId(null);
-                setMsId(null);
-                setProjects([]);
-              }
-              loadSolutions();
-            }}
+            actions={
+              <EntityMenu
+                editTitle={t("entity.editSolution")}
+                name={s.name}
+                description={s.description ?? ""}
+                color={s.color || "#0969da"}
+                status={s.status}
+                statusOptions={optionsFrom(
+                  SOLUTION_STATUSES,
+                  SOLUTION_STATUS_META,
+                  t,
+                )}
+                onSave={(patch) =>
+                  api.updateSolution(s.id, patch as UpdateSolutionInput)
+                }
+                onDelete={() => api.deleteSolution(s.id)}
+                onChanged={loadSolutions}
+                onDeleted={() => {
+                  if (solId === s.id) {
+                    setSolId(null);
+                    setProjId(null);
+                    setMsId(null);
+                    setProjects([]);
+                  }
+                  loadSolutions();
+                }}
+              />
+            }
           />
         ),
       )
@@ -325,16 +359,35 @@ export function Explorer({
               <MetaPill meta={PROJECT_STATUS_META[p.status]} />
             </span>
           }
-          onDelete={() => api.deleteProject(p.id)}
-          onDeleted={() => {
-            if (projId === p.id) {
-              setProjId(null);
-              setMsId(null);
-              setMilestones([]);
-              setTasks([]);
-            }
-            if (solId) loadProjects(solId);
-          }}
+          actions={
+            <EntityMenu
+              editTitle={t("entity.editProject")}
+              name={p.name}
+              description={p.description ?? ""}
+              status={p.status}
+              statusOptions={optionsFrom(
+                PROJECT_STATUSES,
+                PROJECT_STATUS_META,
+                t,
+              )}
+              onSave={(patch) =>
+                api.updateProject(p.id, patch as UpdateProjectInput)
+              }
+              onDelete={() => api.deleteProject(p.id)}
+              onChanged={() => {
+                if (solId) loadProjects(solId);
+              }}
+              onDeleted={() => {
+                if (projId === p.id) {
+                  setProjId(null);
+                  setMsId(null);
+                  setMilestones([]);
+                  setTasks([]);
+                }
+                if (solId) loadProjects(solId);
+              }}
+            />
+          }
         />
       ),
     )
@@ -386,14 +439,48 @@ export function Explorer({
               <MetaPill meta={MILESTONE_STATUS_META[m.status]} />
             </span>
           }
-          onDelete={() => api.deleteMilestone(m.id)}
-          onDeleted={() => {
-            if (msId === m.id) {
-              setMsId(null);
-              setTasks([]);
-            }
-            if (projId) loadMilestones(projId);
-          }}
+          actions={
+            <EntityMenu
+              editTitle={t("entity.editMilestone")}
+              name={m.title}
+              description={m.description ?? ""}
+              status={m.status}
+              statusOptions={optionsFrom(
+                MILESTONE_STATUSES,
+                MILESTONE_STATUS_META,
+                t,
+              )}
+              outcome={m.outcome}
+              outcomeOptions={optionsFrom(
+                MILESTONE_OUTCOMES,
+                MILESTONE_OUTCOME_META,
+                t,
+              )}
+              onSave={({ name, description, status, outcome }) =>
+                api.updateMilestone(m.id, {
+                  ...(name === undefined ? {} : { title: name }),
+                  ...(description === undefined ? {} : { description }),
+                  ...(status === undefined
+                    ? {}
+                    : { status: status as MilestoneStatus }),
+                  ...(outcome === undefined
+                    ? {}
+                    : { outcome: (outcome ?? null) as MilestoneOutcome | null }),
+                })
+              }
+              onDelete={() => api.deleteMilestone(m.id)}
+              onChanged={() => {
+                if (projId) loadMilestones(projId);
+              }}
+              onDeleted={() => {
+                if (msId === m.id) {
+                  setMsId(null);
+                  setTasks([]);
+                }
+                if (projId) loadMilestones(projId);
+              }}
+            />
+          }
         />
       ),
     )
@@ -637,7 +724,7 @@ function ViewTabs({
       key={v}
       onClick={() => onChange(v)}
       aria-current={value === v ? "page" : undefined}
-      className={`-mb-px border-b-2 py-2.5 text-[11px] font-semibold uppercase tracking-[0.5px] transition-colors ${
+      className={`-mb-px flex items-center self-stretch border-b-2 text-[11px] font-semibold uppercase tracking-[0.5px] transition-colors ${
         value === v
           ? "border-accent text-fg"
           : "border-transparent text-fg-subtle hover:text-fg"
@@ -647,7 +734,7 @@ function ViewTabs({
     </button>
   );
   return (
-    <div className="flex shrink-0 items-center gap-4 border-b border-edge-muted px-3">
+    <div className="flex h-11 shrink-0 items-center gap-4 border-b border-edge-muted px-3">
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
           {t("explorer.tasks")}
@@ -806,8 +893,7 @@ function DrillRow({
   counts,
   percent,
   sub,
-  onDelete,
-  onDeleted,
+  actions,
 }: {
   narrow?: boolean;
   active: boolean;
@@ -820,8 +906,8 @@ function DrillRow({
   counts: StatusCounts;
   percent: number;
   sub: ReactNode;
-  onDelete: () => Promise<unknown>;
-  onDeleted: () => void;
+  /** Row actions (kebab menu) - revealed on hover, desktop only. */
+  actions?: ReactNode;
 }) {
   return (
     <Pulse signal={percent} variant="percent">
@@ -863,16 +949,11 @@ function DrillRow({
             />
           </div>
         </button>
-        {/* Deletion: desktop only (reveal on hover). Touch has no hover, and
-          deleting from the list is destructive and rare - it stays on desktop. */}
-        {!narrow && (
-          <span className="absolute right-1 top-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-            <DeleteButton
-              label=""
-              className="bg-canvas"
-              onDelete={onDelete}
-              onDone={onDeleted}
-            />
+        {/* Row actions (edit / status / delete): desktop only (reveal on hover).
+          Touch has no hover, and these mutations are rare - they stay on desktop. */}
+        {!narrow && actions && (
+          <span className="absolute right-1 top-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            {actions}
           </span>
         )}
       </div>

@@ -38,6 +38,7 @@ enum Glyph {
         case "clock": return "clock"
         case "check": return "checkmark"
         case "trash": return "trash"
+        case "kebab": return "ellipsis"
         case "block": return "nosign"
         case "overview": return "square.grid.2x2"
         default: return "circle"

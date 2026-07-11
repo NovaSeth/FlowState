@@ -94,6 +94,58 @@ final class FlowStateAPITests: XCTestCase {
         XCTAssertEqual(body["author"] as? String, "dashboard")
     }
 
+    func testTasksByProjectCarriesQuery() async throws {
+        let api = makeAPI()
+        MockURLProtocol.state.stub = .init(status: 200, data: try fixture("tasks"))
+        _ = try await api.tasks(projectId: "pr_abc")
+        let comps = URLComponents(url: lastRequest.url!, resolvingAgainstBaseURL: false)!
+        XCTAssertEqual(comps.path, "/api/tasks")
+        XCTAssertEqual(comps.queryItems?.first(where: { $0.name == "projectId" })?.value, "pr_abc")
+    }
+
+    func testUpdateSolutionPatchesOnlyProvidedFields() async throws {
+        let api = makeAPI()
+        let solution = ##"{"id":"so_1","name":"S","description":"","color":"#0969da","status":"active","createdAt":"2026-06-04T00:00:00.000Z","updatedAt":"2026-06-04T00:00:00.000Z"}"##
+        MockURLProtocol.state.stub = .init(status: 200, data: Data(solution.utf8))
+        _ = try await api.updateSolution(id: "so_1", status: .archived)
+        XCTAssertEqual(lastRequest.httpMethod, "PATCH")
+        XCTAssertEqual(lastRequest.url?.path, "/api/solutions/so_1")
+        let body = try XCTUnwrap(bodyJSON(lastRequest))
+        XCTAssertEqual(body["status"] as? String, "archived")
+        // Partial patch: untouched fields must not appear in the body at all.
+        XCTAssertNil(body["name"])
+        XCTAssertNil(body["color"])
+    }
+
+    func testUpdateMilestoneClearsOutcomeWithNull() async throws {
+        let api = makeAPI()
+        let milestone = #"{"id":"mi_1","projectId":"pr_1","title":"M","description":"","status":"active","position":0,"outcome":null,"createdAt":"2026-06-04T00:00:00.000Z","updatedAt":"2026-06-04T00:00:00.000Z"}"#
+        MockURLProtocol.state.stub = .init(status: 200, data: Data(milestone.utf8))
+        _ = try await api.updateMilestone(id: "mi_1", outcome: .some(nil))
+        XCTAssertEqual(lastRequest.httpMethod, "PATCH")
+        XCTAssertEqual(lastRequest.url?.path, "/api/milestones/mi_1")
+        let body = try XCTUnwrap(bodyJSON(lastRequest))
+        XCTAssertTrue(body["outcome"] is NSNull, "clearing must send JSON null")
+    }
+
+    func testUpdateMilestoneSetsOutcomeValue() async throws {
+        let api = makeAPI()
+        let milestone = #"{"id":"mi_1","projectId":"pr_1","title":"M","description":"","status":"active","position":0,"outcome":"shipped","createdAt":"2026-06-04T00:00:00.000Z","updatedAt":"2026-06-04T00:00:00.000Z"}"#
+        MockURLProtocol.state.stub = .init(status: 200, data: Data(milestone.utf8))
+        _ = try await api.updateMilestone(id: "mi_1", outcome: .shipped)
+        let body = try XCTUnwrap(bodyJSON(lastRequest))
+        XCTAssertEqual(body["outcome"] as? String, "shipped")
+    }
+
+    func testDeleteSendsDeleteWithTrustHeader() async throws {
+        let api = makeAPI()
+        MockURLProtocol.state.stub = .init(status: 204, data: Data())
+        try await api.deleteProject(id: "pr_1")
+        XCTAssertEqual(lastRequest.httpMethod, "DELETE")
+        XCTAssertEqual(lastRequest.url?.path, "/api/projects/pr_1")
+        XCTAssertEqual(lastRequest.value(forHTTPHeaderField: "x-fs-dashboard"), "1")
+    }
+
     func testNon2xxThrowsAPIError() async throws {
         let api = makeAPI()
         MockURLProtocol.state.stub = .init(status: 422, data: Data(#"{"error":"bad"}"#.utf8))

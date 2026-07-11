@@ -28,11 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let slowInterval: TimeInterval = 4
     private let fastInterval: TimeInterval = 1
 
-    // Icon "blink" on server API activity (only while running).
-    private var pulseTimer: Timer?
-    private var lastPulse: Int?
-    private let pulseInterval: TimeInterval = 0.8
-
     private let work = DispatchQueue(label: "com.flowstate.menubar.work", qos: .utility)
 
     // MARK: - lifecycle
@@ -74,9 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controlServer?.updateStatus(token(displayState()))
 
         schedulePoll(interval: slowInterval)
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: pulseInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkPulse() }
-        }
         // Nudge the independent server agent up if it is installed but not serving.
         // The app does NOT own the server (it is a launchd agent); this is just a
         // convenience. `--no-server` skips even the nudge (pure observer).
@@ -306,40 +298,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return target == .stopped ? .stopping : .starting
         }
         return state
-    }
-
-    // MARK: - activity blink
-
-    private func checkPulse() {
-        guard state == .running else { lastPulse = nil; return }
-        // fetchPulse is non-blocking (URLSession); call it directly and hop the
-        // result back onto the main actor.
-        controller.fetchPulse { [weak self] count in
-            guard let count else { return }
-            _Concurrency.Task { @MainActor in
-                guard let self else { return }
-                if let last = self.lastPulse, count > last { self.blink() }
-                self.lastPulse = count
-            }
-        }
-    }
-
-    /// Quick flicker of the menu-bar icon to signal API activity.
-    private func blink() {
-        guard let btn = statusItem.button else { return }
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.07
-            btn.animator().alphaValue = 0.3
-        }, completionHandler: {
-            // AppKit runs this on the main thread; assert that to the compiler so the
-            // main-actor AppKit calls are legal.
-            MainActor.assumeIsolated {
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.2
-                    btn.animator().alphaValue = 1.0
-                }
-            }
-        })
     }
 
     // MARK: - actions

@@ -176,6 +176,21 @@
     "default": "Usun",
     "solution": "Usun solucje"
   },
+  "entity": {
+    "actions": "Akcje",
+    "edit": "Edytuj szczegoly",
+    "editSolution": "Edytuj solucje",
+    "editProject": "Edytuj projekt",
+    "editMilestone": "Edytuj kamien",
+    "name": "Nazwa",
+    "description": "Opis",
+    "descriptionPlaceholder": "Krotki kontekst: co to jest i co dostarcza",
+    "color": "Kolor",
+    "status": "Status",
+    "outcome": "Wynik",
+    "noOutcome": "Brak",
+    "save": "Zapisz"
+  },
   "settings": {
     "eyebrow": "Ustawienia",
     "viewMode": "Tryb widoku (SSR)",
@@ -258,6 +273,11 @@
     "keyRevoked": "Odwolany",
     "keyMinted": "Zmintowane klucze",
     "noExpiry": "bezterminowo",
-    "globalScope": "wszystkie (globalny)"
+    "globalScope": "wszystkie (globalny)",
+    "grants": "Dostep",
+    "grantGlobal": "Globalnie - wszystko",
+    "wholeSolution": "cala solucja",
+    "addGrant": "Dodaj miejsce",
+    "removeGrant": "Usun miejsce"
   }
 }

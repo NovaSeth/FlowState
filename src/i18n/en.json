@@ -176,6 +176,21 @@
     "default": "Delete",
     "solution": "Delete solution"
   },
+  "entity": {
+    "actions": "Actions",
+    "edit": "Edit details",
+    "editSolution": "Edit solution",
+    "editProject": "Edit project",
+    "editMilestone": "Edit milestone",
+    "name": "Name",
+    "description": "Description",
+    "descriptionPlaceholder": "Short context: what this is and what it delivers",
+    "color": "Color",
+    "status": "Status",
+    "outcome": "Outcome",
+    "noOutcome": "None",
+    "save": "Save"
+  },
   "settings": {
     "eyebrow": "Settings",
     "viewMode": "View mode (SSR)",
@@ -258,6 +273,11 @@
     "keyRevoked": "Revoked",
     "keyMinted": "Keys minted",
     "noExpiry": "never",
-    "globalScope": "all (global)"
+    "globalScope": "all (global)",
+    "grants": "Access",
+    "grantGlobal": "Global - everything",
+    "wholeSolution": "whole solution",
+    "addGrant": "Add place",
+    "removeGrant": "Remove place"
   }
 }

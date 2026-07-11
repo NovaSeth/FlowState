@@ -23,17 +23,17 @@ public enum ArtifactKind: String, Codable, Sendable {
     case commit, pr, file, url
 }
 
-public enum MilestoneOutcome: String, Codable, Sendable {
+public enum MilestoneOutcome: String, Codable, CaseIterable, Sendable {
     case shipped, infeasible, descoped
 }
 
-public enum ProjectStatus: String, Codable, Sendable {
+public enum ProjectStatus: String, Codable, CaseIterable, Sendable {
     case active, paused, done, archived
 }
 
 public typealias MilestoneStatus = ProjectStatus
 
-public enum SolutionStatus: String, Codable, Sendable {
+public enum SolutionStatus: String, Codable, CaseIterable, Sendable {
     case active, archived
 }
 

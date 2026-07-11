@@ -16,6 +16,9 @@ import SwiftUI
 final class AppStore: ObservableObject {
     enum Section: String, CaseIterable { case overview, explore, users, settings }
     enum TaskViewMode: String, CaseIterable { case list, kanban }
+    // Web ProjectView: two ways to look at a single project - the milestone-cards
+    // dashboard (default) or the Miller "columns" cascade.
+    enum ProjectViewMode: String, CaseIterable { case dashboard, columns }
 
     // Navigation (top-level section, mirrors the web NavRail).
     @Published var section: Section = .overview
@@ -26,6 +29,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var projects: [ProjectRollup] = []
     @Published private(set) var milestones: [MilestoneRollup] = []
     @Published private(set) var tasks: [TaskListItem] = []
+    /// Every task in the selected project (across milestones) - the project
+    /// dashboard view's data. Refreshed by the same SSE-driven refetch.
+    @Published private(set) var projectTasks: [TaskListItem] = []
     @Published private(set) var taskDetail: TaskDetail?
 
     // Selection (the cascading drill state).
@@ -37,6 +43,11 @@ final class AppStore: ObservableObject {
     // View preferences (persist across navigation, like the web).
     @Published var taskViewMode: TaskViewMode = .list
     @Published var showClosed = false
+    // Dashboard | Columns choice for the project region, persisted across
+    // relaunches (same UserDefaults pattern as fs.miller.collapsed).
+    @Published var projectViewMode: ProjectViewMode {
+        didSet { UserDefaults.standard.set(projectViewMode.rawValue, forKey: "fs.projectView") }
+    }
 
     // Users (actors / keys / activity).
     @Published private(set) var actors: [Actor] = []
@@ -68,6 +79,9 @@ final class AppStore: ObservableObject {
         self.api = api
         self.events = events
         self.i18n = Localization.load(locale: locale, bundle: .main)
+        // Restore the persisted project view mode (default = dashboard, like the web).
+        self.projectViewMode = UserDefaults.standard.string(forKey: "fs.projectView")
+            .flatMap(ProjectViewMode.init(rawValue:)) ?? .dashboard
         // Launch hook (deep-link / screenshots): `--section <name>` opens a section.
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "--section"), i + 1 < args.count, let sec = Section(rawValue: args[i + 1]) {
@@ -151,7 +165,10 @@ final class AppStore: ObservableObject {
     func refetchVisible() async {
         await reloadOverview()
         if let id = selectedSolutionId { await loadProjects(id) }
-        if let id = selectedProjectId { await loadMilestones(id) }
+        if let id = selectedProjectId {
+            await loadMilestones(id)
+            await loadProjectTasks(id)
+        }
         if let id = selectedMilestoneId { await loadTasks(id) }
         if let id = selectedTaskId { await loadTaskDetail(id) }
         if section == .users {
@@ -171,6 +188,10 @@ final class AppStore: ObservableObject {
     @MainActor
     private func loadTasks(_ milestoneId: String) async {
         do { tasks = try await api.tasks(milestoneId: milestoneId) } catch { capture(error) }
+    }
+    @MainActor
+    private func loadProjectTasks(_ projectId: String) async {
+        do { projectTasks = try await api.tasks(projectId: projectId) } catch { capture(error) }
     }
     @MainActor
     private func loadTaskDetail(_ id: String) async {
@@ -195,7 +216,7 @@ final class AppStore: ObservableObject {
     func selectSolution(_ id: String) async {
         selectedSolutionId = id
         selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
-        projects = []; milestones = []; tasks = []; taskDetail = nil
+        projects = []; milestones = []; tasks = []; projectTasks = []; taskDetail = nil
         await loadProjects(id)
     }
 
@@ -203,8 +224,9 @@ final class AppStore: ObservableObject {
     func selectProject(_ id: String) async {
         selectedProjectId = id
         selectedMilestoneId = nil; selectedTaskId = nil
-        milestones = []; tasks = []; taskDetail = nil
+        milestones = []; tasks = []; projectTasks = []; taskDetail = nil
         await loadMilestones(id)
+        await loadProjectTasks(id)
     }
 
     @MainActor
@@ -370,6 +392,74 @@ final class AppStore: ObservableObject {
             await refetchVisible()
             return true
         } catch { capture(error); return false }
+    }
+
+    // MARK: - Entity mutations (row kebab menu: edit / status / outcome / delete).
+    //
+    // These THROW instead of capturing into errorMessage: the kebab menu and the
+    // edit sheet surface failures inline next to the control that caused them
+    // (mirroring the web EntityMenu), so the caller owns the error presentation.
+    // On success the visible slice is refetched, same as every other mutation.
+
+    @MainActor
+    func updateSolution(
+        _ id: String, name: String? = nil, description: String? = nil,
+        color: String? = nil, status: SolutionStatus? = nil
+    ) async throws {
+        _ = try await api.updateSolution(id: id, name: name, description: description, color: color, status: status)
+        await refetchVisible()
+    }
+
+    @MainActor
+    func updateProject(
+        _ id: String, name: String? = nil, description: String? = nil,
+        status: ProjectStatus? = nil
+    ) async throws {
+        _ = try await api.updateProject(id: id, name: name, description: description, status: status)
+        await refetchVisible()
+    }
+
+    /// `outcome`: omit to leave untouched, `.some(nil)` to clear, value to set.
+    @MainActor
+    func updateMilestone(
+        _ id: String, title: String? = nil, description: String? = nil,
+        status: MilestoneStatus? = nil, outcome: MilestoneOutcome?? = nil
+    ) async throws {
+        _ = try await api.updateMilestone(id: id, title: title, description: description, status: status, outcome: outcome)
+        await refetchVisible()
+    }
+
+    // Deletes clear the now-dangling selection (and every deeper level) before
+    // refetching, exactly like the web Explorer's onDeleted handlers.
+
+    @MainActor
+    func deleteSolution(_ id: String) async throws {
+        try await api.deleteSolution(id: id)
+        if selectedSolutionId == id {
+            selectedSolutionId = nil; selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
+            projects = []; milestones = []; tasks = []; projectTasks = []; taskDetail = nil
+        }
+        await refetchVisible()
+    }
+
+    @MainActor
+    func deleteProject(_ id: String) async throws {
+        try await api.deleteProject(id: id)
+        if selectedProjectId == id {
+            selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
+            milestones = []; tasks = []; projectTasks = []; taskDetail = nil
+        }
+        await refetchVisible()
+    }
+
+    @MainActor
+    func deleteMilestone(_ id: String) async throws {
+        try await api.deleteMilestone(id: id)
+        if selectedMilestoneId == id {
+            selectedMilestoneId = nil; selectedTaskId = nil
+            tasks = []; taskDetail = nil
+        }
+        await refetchVisible()
     }
 
     // MARK: - Locale

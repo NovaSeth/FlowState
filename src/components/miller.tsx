@@ -29,7 +29,7 @@ export function ColHeader({
 }) {
   const t = useT();
   return (
-    <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-2.5">
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-edge-muted px-3">
       <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
         {title}
       </span>
