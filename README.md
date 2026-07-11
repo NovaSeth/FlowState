@@ -134,6 +134,13 @@ Auth is resolved per request (see `resolveContext` in `src/lib/http.ts`):
   keys (format `fsk_<prefix>.<secret>`, where the secret is shown only once at
   creation) via the `fs_mint_agent_key` MCP tool or `POST /api/keys`, and manage
   them in the `/users` UI.
+- **Grants:** a key carries a list of grants chosen at creation - each grant
+  targets one project (`{"projectId": ...}`), one whole solution
+  (`{"solutionId": ...}`) or everything (neither id), with `read` or `write`
+  rights per grant. Reads and lists are filtered to the covered places;
+  mutations need a covering `write` grant. Delegated (child) keys can only
+  narrow the parent key's grants, never widen them. Legacy single
+  `solutionId`+`scope` keys keep working as a one-grant key.
 
 Because GET endpoints are unauthenticated in open mode, **do not expose the
 open-mode server to untrusted networks**. For LAN/shared/public hosting, set an

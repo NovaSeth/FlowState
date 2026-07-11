@@ -181,15 +181,15 @@ function resolveContext(req: Request): RequestContext {
   if (hasAdmin && safeEqual(token, admin)) return { admin: true };
   const resolved = repo().resolveApiKey(token);
   if (!resolved) throw new AppError(401, "Invalid API key (x-api-key)");
-  // Scope enforcement: a 'read' key cannot perform mutations.
-  if (mutating && resolved.scope === "read") {
+  // Scope enforcement: a key with no write grant at all cannot perform any
+  // mutation. Per-entity write coverage is enforced deeper, in the repo.
+  if (mutating && !resolved.grants.some((g) => g.scope === "write")) {
     throw new AppError(403, "API key has read-only permissions (read)");
   }
   return {
     actorId: resolved.actorId,
     keyId: resolved.keyId,
-    keySolutionId: resolved.solutionId ?? undefined,
-    keyScope: resolved.scope,
+    keyGrants: resolved.grants,
   };
 }
 

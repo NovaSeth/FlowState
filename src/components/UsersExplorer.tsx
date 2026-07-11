@@ -23,7 +23,10 @@ import type {
   Activity,
   ApiKey,
   ApiKeyWithSecret,
+  KeyGrant,
+  KeyGrantInput,
   KeyScope,
+  ProjectRollup,
   SolutionRollup,
 } from "@/lib/types";
 
@@ -46,14 +49,17 @@ export function UsersExplorer({
   initialActors,
   initialKeys,
   initialSolutions,
+  initialProjects,
 }: {
   initialActors: Actor[];
   initialKeys: ApiKey[];
   initialSolutions: SolutionRollup[];
+  initialProjects: ProjectRollup[];
 }) {
   const t = useT();
   const narrow = useIsNarrow();
   const solutions = initialSolutions;
+  const projects = initialProjects;
 
   const [actors, setActors] = useState<Actor[]>(initialActors);
   // All keys (for the counters in the actors column); the keys column filters
@@ -125,12 +131,23 @@ export function UsersExplorer({
   const selectedKey = keys.find((k) => k.id === keyId) ?? null;
   const actorKeys = actorId ? keys.filter((k) => k.actorId === actorId) : [];
 
-  const solutionName = (id: string | null) =>
-    id ? (solutions.find((s) => s.id === id)?.name ?? id) : t("users.globalScope");
+  // Human summary of one grant: target name + rights, e.g. "Zelda: write".
+  const grantLabel = (g: KeyGrant) =>
+    `${
+      g.projectId
+        ? (projects.find((p) => p.id === g.projectId)?.name ?? g.projectId)
+        : g.solutionId
+          ? (solutions.find((s) => s.id === g.solutionId)?.name ?? g.solutionId)
+          : t("users.grantGlobal")
+    }: ${g.scope}`;
   const keyCountOf = (id: string) =>
     keys.filter((k) => k.actorId === id && !k.revokedAt).length;
 
-  async function createActor(name: string, kind: ActorKind) {
+  async function createActor(
+    name: string,
+    kind: ActorKind,
+    grants: KeyGrantInput[],
+  ) {
     setError(null);
     try {
       const a = await api.createActor({ name, kind });
@@ -138,10 +155,12 @@ export function UsersExplorer({
       await selectActor(a.id);
       // An agent with no key is useless and a footgun: a session would then
       // grab some other key and silently authenticate as the wrong actor. Mint
-      // a write key right away and surface the token, so an agent is never left
-      // keyless. Humans act through the UI and need no key.
+      // a key right away - with the grants chosen in the form (places + rights
+      // are picked at creation, not on a later sub-token) - and surface the
+      // token, so an agent is never left keyless. Humans act through the UI
+      // and need no key.
       if (kind === "agent") {
-        const created = await api.createApiKey({ actorId: a.id, scope: "write" });
+        const created = await api.createApiKey({ actorId: a.id, grants });
         setJustCreated(created);
         await loadKeys();
       }
@@ -150,11 +169,11 @@ export function UsersExplorer({
     }
   }
 
-  async function createKey(scope: KeyScope, solutionId: string | undefined) {
+  async function createKey(grants: KeyGrantInput[]) {
     if (!actorId) return;
     setError(null);
     try {
-      const created = await api.createApiKey({ actorId, solutionId, scope });
+      const created = await api.createApiKey({ actorId, grants });
       setJustCreated(created);
       await loadKeys();
     } catch (e) {
@@ -242,7 +261,11 @@ export function UsersExplorer({
           )
         )}
       </div>
-      <AddActorCta onCreate={createActor} />
+      <AddActorCta
+        solutions={solutions}
+        projects={projects}
+        onCreate={createActor}
+      />
     </div>
   );
 
@@ -258,7 +281,7 @@ export function UsersExplorer({
                 key={k.id}
                 active={k.id === keyId}
                 apiKey={k}
-                solutionName={solutionName(k.solutionId)}
+                grantsLine={k.grants.map(grantLabel).join(" · ")}
                 onSelect={() => selectKey(k.id)}
                 onRevoke={() => revoke(k.id)}
               />
@@ -266,7 +289,7 @@ export function UsersExplorer({
           </div>
         )}
       </div>
-      <AddKeyCta solutions={solutions} onCreate={createKey} />
+      <AddKeyCta solutions={solutions} projects={projects} onCreate={createKey} />
     </div>
   );
 
@@ -299,7 +322,7 @@ export function UsersExplorer({
       {keyTab === "details" ? (
         <KeyDetails
           apiKey={selectedKey}
-          solutionName={selectedKey ? solutionName(selectedKey.solutionId) : "-"}
+          grantLabels={selectedKey ? selectedKey.grants.map(grantLabel) : []}
           mintedCount={
             selectedKey
               ? keys.filter((k) => k.createdByKeyId === selectedKey.id).length
@@ -506,13 +529,14 @@ function ActorRow({
 function KeyRow({
   active,
   apiKey,
-  solutionName,
+  grantsLine,
   onSelect,
   onRevoke,
 }: {
   active: boolean;
   apiKey: ApiKey;
-  solutionName: string;
+  /** Human summary of the key's grants, e.g. "Zelda: write · global: read". */
+  grantsLine: string;
   onSelect: () => void;
   onRevoke: () => void;
 }) {
@@ -558,7 +582,7 @@ function KeyRow({
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-subtle">
-        <span>{solutionName}</span>
+        <span>{grantsLine}</span>
         {apiKey.expiresAt && (
           <span className={expired ? "text-danger" : ""}>
             {expired ? t("users.expired") : t("users.expiresAt", { when: formatTimestamp(apiKey.expiresAt) })}
@@ -576,11 +600,12 @@ function KeyRow({
 
 function KeyDetails({
   apiKey,
-  solutionName,
+  grantLabels,
   mintedCount,
 }: {
   apiKey: ApiKey | null;
-  solutionName: string;
+  /** Human summaries of the key's grants (one entry per grant). */
+  grantLabels: string[];
   mintedCount: number;
 }) {
   const t = useT();
@@ -592,7 +617,16 @@ function KeyDetails({
       value: <code className="font-mono text-fg">{apiKey.prefix}</code>,
     },
     { label: t("users.permissions"), value: apiKey.scope },
-    { label: t("users.solutionScope"), value: solutionName },
+    {
+      label: t("users.grants"),
+      value: (
+        <span className="flex flex-col items-end gap-0.5">
+          {grantLabels.map((label, i) => (
+            <span key={i}>{label}</span>
+          ))}
+        </span>
+      ),
+    },
     {
       label: t("users.keyExpiry"),
       value: apiKey.expiresAt ? (
@@ -671,22 +705,129 @@ function ActivityFeed({
   );
 }
 
+/** One editable grant row in the key-creation forms. Target encoding:
+ *  "" = global, "s:<id>" = whole solution, "p:<id>" = one project. */
+type GrantDraft = { target: string; scope: KeyScope };
+
+const freshDraft = (): GrantDraft => ({ target: "", scope: "write" });
+
+const draftsToGrants = (drafts: GrantDraft[]): KeyGrantInput[] =>
+  drafts.map((d) => ({
+    ...(d.target.startsWith("s:") ? { solutionId: d.target.slice(2) } : {}),
+    ...(d.target.startsWith("p:") ? { projectId: d.target.slice(2) } : {}),
+    scope: d.scope,
+  }));
+
+/**
+ * The grants picker used by BOTH key-creation forms: several rows, each a
+ * place (global / whole solution / one project) plus the rights on it. Places
+ * and rights are chosen at creation time - no follow-up sub-token needed.
+ */
+function GrantsEditor({
+  drafts,
+  onChange,
+  solutions,
+  projects,
+}: {
+  drafts: GrantDraft[];
+  onChange: (drafts: GrantDraft[]) => void;
+  solutions: SolutionRollup[];
+  projects: ProjectRollup[];
+}) {
+  const t = useT();
+  const set = (i: number, patch: Partial<GrantDraft>) =>
+    onChange(drafts.map((d, di) => (di === i ? { ...d, ...patch } : d)));
+  const selectCls =
+    "rounded-md border border-edge bg-canvas px-2 py-1.5 text-sm text-fg";
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
+        {t("users.grants")}
+      </span>
+      {drafts.map((d, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <select
+            value={d.target}
+            onChange={(e) => set(i, { target: e.target.value })}
+            aria-label={t("users.grants")}
+            className={`min-w-0 flex-1 ${selectCls}`}
+          >
+            <option value="">{t("users.grantGlobal")}</option>
+            {solutions.map((s) => (
+              <optgroup key={s.id} label={s.name}>
+                <option value={`s:${s.id}`}>
+                  {s.name} - {t("users.wholeSolution")}
+                </option>
+                {projects
+                  .filter((p) => p.solutionId === s.id)
+                  .map((p) => (
+                    <option key={p.id} value={`p:${p.id}`}>
+                      {s.name} › {p.name}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+          </select>
+          <select
+            value={d.scope}
+            onChange={(e) => set(i, { scope: e.target.value as KeyScope })}
+            aria-label={t("users.scope")}
+            className={selectCls}
+          >
+            <option value="write">write</option>
+            <option value="read">read</option>
+          </select>
+          {drafts.length > 1 && (
+            <button
+              type="button"
+              onClick={() => onChange(drafts.filter((_, di) => di !== i))}
+              aria-label={t("users.removeGrant")}
+              title={t("users.removeGrant")}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-fg-subtle hover:bg-neutral-muted hover:text-danger"
+            >
+              <Icon name="close" size={13} />
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...drafts, freshDraft()])}
+        className="flex items-center gap-1 self-start rounded-md px-1.5 py-1 text-xs font-medium text-accent hover:bg-canvas-subtle"
+      >
+        <Icon name="plus" size={13} />
+        {t("users.addGrant")}
+      </button>
+    </div>
+  );
+}
+
 function AddActorCta({
+  solutions,
+  projects,
   onCreate,
 }: {
-  onCreate: (name: string, kind: ActorKind) => Promise<void>;
+  solutions: SolutionRollup[];
+  projects: ProjectRollup[];
+  onCreate: (
+    name: string,
+    kind: ActorKind,
+    grants: KeyGrantInput[],
+  ) => Promise<void>;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ActorKind>("agent");
+  const [drafts, setDrafts] = useState<GrantDraft[]>([freshDraft()]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    await onCreate(name.trim(), kind);
+    await onCreate(name.trim(), kind, draftsToGrants(drafts));
     setName("");
     setKind("agent");
+    setDrafts([freshDraft()]);
     setOpen(false);
   }
 
@@ -711,6 +852,16 @@ function AddActorCta({
             <option value="agent">{t("users.kindAgent")}</option>
             <option value="human">{t("users.kindHuman")}</option>
           </select>
+          {/* An agent gets its key minted right away, so the places + rights
+              are chosen here - humans act through the UI and need no key. */}
+          {kind === "agent" && (
+            <GrantsEditor
+              drafts={drafts}
+              onChange={setDrafts}
+              solutions={solutions}
+              projects={projects}
+            />
+          )}
           <div className="flex gap-2">
             <button
               type="submit"
@@ -742,21 +893,21 @@ function AddActorCta({
 
 function AddKeyCta({
   solutions,
+  projects,
   onCreate,
 }: {
   solutions: SolutionRollup[];
-  onCreate: (scope: KeyScope, solutionId: string | undefined) => Promise<void>;
+  projects: ProjectRollup[];
+  onCreate: (grants: KeyGrantInput[]) => Promise<void>;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [scope, setScope] = useState<KeyScope>("write");
-  const [solutionId, setSolutionId] = useState("");
+  const [drafts, setDrafts] = useState<GrantDraft[]>([freshDraft()]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await onCreate(scope, solutionId || undefined);
-    setScope("write");
-    setSolutionId("");
+    await onCreate(draftsToGrants(drafts));
+    setDrafts([freshDraft()]);
     setOpen(false);
   }
 
@@ -764,28 +915,12 @@ function AddKeyCta({
     <div className="shrink-0 border-t border-edge bg-canvas p-2">
       {open ? (
         <form onSubmit={submit} className="flex flex-col gap-2">
-          <select
-            value={scope}
-            onChange={(e) => setScope(e.target.value as KeyScope)}
-            aria-label={t("users.scope")}
-            className="rounded-md border border-edge bg-canvas px-2 py-1.5 text-sm text-fg"
-          >
-            <option value="write">write</option>
-            <option value="read">read</option>
-          </select>
-          <select
-            value={solutionId}
-            onChange={(e) => setSolutionId(e.target.value)}
-            aria-label={t("users.solutionScope")}
-            className="rounded-md border border-edge bg-canvas px-2 py-1.5 text-sm text-fg"
-          >
-            <option value="">{t("users.globalScope")}</option>
-            {solutions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <GrantsEditor
+            drafts={drafts}
+            onChange={setDrafts}
+            solutions={solutions}
+            projects={projects}
+          />
           <div className="flex gap-2">
             <button
               type="submit"

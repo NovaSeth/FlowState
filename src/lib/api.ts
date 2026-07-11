@@ -70,8 +70,10 @@ export const api = {
   changesSince: (since: string) =>
     req<ChangesSincePayload>(`/api/changes?${qs({ since })}`),
   listSolutions: () => req<SolutionRollup[]>("/api/solutions"),
-  listProjects: (solutionId: string) =>
-    req<ProjectRollup[]>(`/api/projects?${qs({ solutionId })}`),
+  listProjects: (solutionId?: string) =>
+    req<ProjectRollup[]>(
+      solutionId ? `/api/projects?${qs({ solutionId })}` : "/api/projects",
+    ),
   listMilestones: (projectId: string) =>
     req<MilestoneRollup[]>(`/api/milestones?${qs({ projectId })}`),
   listTasks: (milestoneId: string) =>

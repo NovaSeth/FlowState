@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   prefix TEXT NOT NULL,
   secretHash TEXT NOT NULL,
   scope TEXT NOT NULL DEFAULT 'write',
+  grants TEXT,
   expiresAt TEXT,
   createdByKeyId TEXT,
   lastUsedAt TEXT,
@@ -224,6 +225,12 @@ function migrate(db: DatabaseSync): void {
   // outcome on milestones (deliverable outcome, independent of task %).
   if (!hasColumn(db, "milestones", "outcome")) {
     db.exec(`ALTER TABLE milestones ADD COLUMN outcome TEXT`);
+  }
+
+  // grants on api_keys: JSON list of {solutionId?|projectId?, scope} chosen at
+  // creation. NULL on legacy keys - resolved from solutionId+scope at read time.
+  if (!hasColumn(db, "api_keys", "grants")) {
+    db.exec(`ALTER TABLE api_keys ADD COLUMN grants TEXT`);
   }
 
   // New tables (artifacts, soft links) - on an existing database SCHEMA creates

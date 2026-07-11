@@ -26,6 +26,7 @@ import {
   ApiKeyWithSecret,
   CreateActorInput,
   CreateApiKeyInput,
+  KeyGrant,
   KeyScope,
   KEY_SCOPES,
   Solution,
@@ -64,6 +65,20 @@ import {
 } from "./types";
 
 const now = () => new Date().toISOString();
+
+/** Short human summary of a grant list for the audit log, e.g. "global:write"
+ *  or "solution so_x:write, project pr_y:read". */
+function describeGrants(grants: KeyGrant[]): string {
+  return grants
+    .map((g) =>
+      g.projectId
+        ? `project ${g.projectId}:${g.scope}`
+        : g.solutionId
+          ? `solution ${g.solutionId}:${g.scope}`
+          : `global:${g.scope}`,
+    )
+    .join(", ");
+}
 
 /** Safety guards: limit the batch size (single-process SQLite would block on a
  *  huge array) and the length of an artifact value. */
@@ -199,7 +214,7 @@ const solutionFullyDone = (s: string) =>
 /** Public api_keys columns (everything EXCEPT secretHash). Reads that surface a
  *  key to a caller select this explicit list so the secret hash is never pulled
  *  into memory by accident; only resolveApiKey selects secretHash deliberately. */
-const API_KEY_PUBLIC_COLS = `id, actorId, solutionId, name, prefix, scope, expiresAt, createdByKeyId, lastUsedAt, revokedAt, createdAt`;
+const API_KEY_PUBLIC_COLS = `id, actorId, solutionId, name, prefix, scope, grants, expiresAt, createdByKeyId, lastUsedAt, revokedAt, createdAt`;
 
 /** Data access layer. Holds all the CRUD logic + progress rollups. */
 export class Repo {
@@ -284,41 +299,146 @@ export class Repo {
     return statusCountsFromRows(rows);
   }
 
-  // --- API-key solution scope enforcement ---
+  // --- API-key grant enforcement ---
 
   /**
-   * Solution-scope guard for a key minted with a solutionId (keySolutionId).
-   * Triggers ONLY when the request runs under a solution-scoped key: admin keys,
-   * unscoped keys and anonymous open-mode callers leave keySolutionId undefined and
-   * pass through untouched. A scoped key may only touch entities belonging to its
-   * own solution; anything else is 403. `solutionId === undefined` (the owning
-   * solution could not be resolved, e.g. a missing entity) is treated as
-   * out-of-scope so we never leak across solutions.
+   * Grants of the current request's key. undefined = unrestricted: the admin
+   * key, the trusted keyless local operator and internal callers run without
+   * grants and are never filtered. Legacy solution-scoped keys resolve to a
+   * single solution grant, so they flow through the same machinery.
    */
-  private assertScope(solutionId: string | null | undefined): void {
-    const scoped = currentContext().keySolutionId;
-    if (!scoped) return; // not a solution-scoped key (or admin/anonymous) - no restriction
-    if (solutionId !== scoped) {
-      throw new AppError(403, "API key is scoped to a different solution");
+  private keyGrants(): KeyGrant[] | undefined {
+    return currentContext().keyGrants;
+  }
+
+  /** True when the request runs under a granted (restricted) key. Used to skip
+   *  the owner-lookup joins entirely for unrestricted callers. */
+  private restricted(): boolean {
+    return this.keyGrants() !== undefined;
+  }
+
+  private static isGlobalGrant(g: KeyGrant): boolean {
+    return !g.solutionId && !g.projectId;
+  }
+
+  /** Some grant passes `test`; write=true additionally requires scope "write".
+   *  Unrestricted contexts always pass. */
+  private someGrant(write: boolean, test: (g: KeyGrant) => boolean): boolean {
+    const grants = this.keyGrants();
+    if (!grants) return true;
+    return grants.some((g) => (!write || g.scope === "write") && test(g));
+  }
+
+  /**
+   * Grant guard for an entity living under `solutionId` (and, for a project or
+   * anything deeper, `projectId`). 403 when no grant covers it.
+   * - write: the covering grant must have scope "write" (mutations).
+   * - partial: reading the solution CONTAINER itself is also allowed to a key
+   *   holding only a project grant inside it (it sees the solution shell).
+   * - solutionId undefined/null (the entity path is gone) only passes for a
+   *   global grant - the 404 surfaces downstream instead of leaking data.
+   */
+  private assertScope(
+    solutionId: string | null | undefined,
+    opts: { projectId?: string | null; write?: boolean; partial?: boolean } = {},
+  ): void {
+    const { projectId, write = false, partial = false } = opts;
+    const ok = this.someGrant(write, (g) => {
+      if (Repo.isGlobalGrant(g)) return true;
+      if (!solutionId) return false;
+      if (g.solutionId === solutionId) return true;
+      if (g.projectId) {
+        if (projectId && g.projectId === projectId) return true;
+        if (partial) return this.solutionIdForProject(g.projectId) === solutionId;
+      }
+      return false;
+    });
+    if (!ok) {
+      throw new AppError(
+        403,
+        write
+          ? "API key has no write grant covering this entity"
+          : "API key grants do not cover this entity",
+      );
     }
   }
 
-  /** The solution that the current request's scoped key is bound to, if any.
-   *  Used by read/enumeration paths to force the solutionId filter. */
-  private scopedSolutionId(): string | undefined {
-    return currentContext().keySolutionId;
+  /**
+   * Coverage sets for list/enumeration filters. undefined = no filtering
+   * (unrestricted, or a key holding a global grant). Otherwise: whole-solution
+   * targets plus individually granted projects (any scope - read suffices to list).
+   */
+  private coverageSets():
+    | { solutionIds: string[]; projectIds: string[] }
+    | undefined {
+    const grants = this.keyGrants();
+    if (!grants || grants.some((g) => Repo.isGlobalGrant(g))) return undefined;
+    return {
+      solutionIds: [
+        ...new Set(grants.flatMap((g) => (g.solutionId ? [g.solutionId] : []))),
+      ],
+      projectIds: [
+        ...new Set(grants.flatMap((g) => (g.projectId ? [g.projectId] : []))),
+      ],
+    };
   }
 
-  /** Owning solution of a milestone (via project). undefined when the path is gone. */
-  private solutionIdForMilestone(milestoneId: string): string | undefined {
-    const row = this.db
-      .prepare(
-        `SELECT pr.solutionId AS sid FROM milestones ms
-         JOIN projects pr ON ms.projectId = pr.id
-         WHERE ms.id = ?`,
-      )
-      .get(milestoneId) as { sid: string } | undefined;
-    return row?.sid;
+  /** `col IN (...)` with params; "0" (always false) for an empty id list. */
+  private static inClause(
+    col: string,
+    ids: string[],
+  ): { sql: string; params: string[] } {
+    if (ids.length === 0) return { sql: "0", params: [] };
+    return { sql: `${col} IN (${ids.map(() => "?").join(",")})`, params: ids };
+  }
+
+  /**
+   * SQL predicate limiting rows to the key's coverage, given the column
+   * expressions holding the owning solution id and project id.
+   * undefined = no restriction needed.
+   */
+  private coverageSql(
+    solutionCol: string,
+    projectCol: string,
+  ): { sql: string; params: string[] } | undefined {
+    const cov = this.coverageSets();
+    if (!cov) return undefined;
+    const parts: string[] = [];
+    const params: string[] = [];
+    if (cov.solutionIds.length) {
+      const c = Repo.inClause(solutionCol, cov.solutionIds);
+      parts.push(c.sql);
+      params.push(...c.params);
+    }
+    if (cov.projectIds.length) {
+      const c = Repo.inClause(projectCol, cov.projectIds);
+      parts.push(c.sql);
+      params.push(...c.params);
+    }
+    return parts.length
+      ? { sql: `(${parts.join(" OR ")})`, params }
+      : { sql: "0", params: [] };
+  }
+
+  /**
+   * Solutions visible to the current key, as ids. undefined = all. Includes
+   * solutions covered only partially (via a project grant): the dashboard and
+   * activity feeds are solution-grained by design (local trust model, not a
+   * hard boundary - precise per-project enforcement applies to entity CRUD and
+   * the entity lists).
+   */
+  private coveredSolutionIds(): string[] | undefined {
+    const cov = this.coverageSets();
+    if (!cov) return undefined;
+    const ids = new Set(cov.solutionIds);
+    if (cov.projectIds.length) {
+      const c = Repo.inClause("id", cov.projectIds);
+      const rows = this.db
+        .prepare(`SELECT DISTINCT solutionId AS sid FROM projects WHERE ${c.sql}`)
+        .all(...c.params) as { sid: string }[];
+      for (const r of rows) ids.add(r.sid);
+    }
+    return [...ids];
   }
 
   /** Owning solution of a project. undefined when the project is gone. */
@@ -329,30 +449,65 @@ export class Repo {
     return row?.sid;
   }
 
-  /** Owning solution of a comment's task. undefined when the path is gone. */
-  private solutionIdForComment(commentId: string): string | undefined {
+  /** Owning (solution, project) of a milestone. undefined when the path is gone. */
+  private ownerOfMilestone(
+    milestoneId: string,
+  ): { solutionId: string; projectId: string } | undefined {
     const row = this.db
       .prepare(
-        `SELECT pr.solutionId AS sid FROM comments c
+        `SELECT pr.solutionId AS sid, pr.id AS pid FROM milestones ms
+         JOIN projects pr ON ms.projectId = pr.id
+         WHERE ms.id = ?`,
+      )
+      .get(milestoneId) as { sid: string; pid: string } | undefined;
+    return row ? { solutionId: row.sid, projectId: row.pid } : undefined;
+  }
+
+  /** Owning (solution, project) of a task. undefined when the path is gone. */
+  private ownerOfTask(
+    taskId: string,
+  ): { solutionId: string; projectId: string } | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT pr.solutionId AS sid, pr.id AS pid FROM tasks t
+         JOIN milestones ms ON t.milestoneId = ms.id
+         JOIN projects pr ON ms.projectId = pr.id
+         WHERE t.id = ?`,
+      )
+      .get(taskId) as { sid: string; pid: string } | undefined;
+    return row ? { solutionId: row.sid, projectId: row.pid } : undefined;
+  }
+
+  /** Owning (solution, project) of a comment's task. undefined when gone. */
+  private ownerOfComment(
+    commentId: string,
+  ): { solutionId: string; projectId: string } | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT pr.solutionId AS sid, pr.id AS pid FROM comments c
          JOIN tasks t ON c.taskId = t.id
          JOIN milestones ms ON t.milestoneId = ms.id
          JOIN projects pr ON ms.projectId = pr.id
          WHERE c.id = ?`,
       )
-      .get(commentId) as { sid: string } | undefined;
-    return row?.sid;
+      .get(commentId) as { sid: string; pid: string } | undefined;
+    return row ? { solutionId: row.sid, projectId: row.pid } : undefined;
   }
 
   // --- solutions (RootProject) ---
 
   listSolutions(): SolutionRollup[] {
-    // Scoped key: enumerate ONLY the key's own solution.
-    const scoped = this.scopedSolutionId();
+    // Granted key: enumerate only covered solutions (incl. ones covered
+    // partially via a project grant - the caller sees the solution shell).
+    const covered = this.coveredSolutionIds();
+    const cin = covered ? Repo.inClause("id", covered) : undefined;
     const solutions = (
-      scoped
+      cin
         ? this.db
-            .prepare(`SELECT * FROM solutions WHERE id = ? ORDER BY name COLLATE NOCASE ASC`)
-            .all(scoped)
+            .prepare(
+              `SELECT * FROM solutions WHERE ${cin.sql} ORDER BY name COLLATE NOCASE ASC`,
+            )
+            .all(...cin.params)
         : this.db
             .prepare(`SELECT * FROM solutions ORDER BY name COLLATE NOCASE ASC`)
             .all()
@@ -386,7 +541,7 @@ export class Repo {
   getSolutionRollup(id: string): SolutionRollup | null {
     const solution = this.getSolution(id);
     if (!solution) return null;
-    this.assertScope(solution.id);
+    this.assertScope(solution.id, { partial: true });
     const sc = this.statusCountsWhere(
       `JOIN milestones m ON t.milestoneId = m.id
        JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
@@ -404,9 +559,9 @@ export class Repo {
   }
 
   createSolution(input: CreateSolutionInput): Solution {
-    // A solution-scoped key cannot create other solutions (there is no solution it
-    // could scope-match yet). assertScope(undefined) is out-of-scope -> 403.
-    this.assertScope(undefined);
+    // Creating a solution is a global action: only an unrestricted caller or a
+    // key holding a global write grant may do it.
+    this.assertScope(undefined, { write: true });
     const name = requireString(input.name, "name");
     const description = optionalString(input.description, "description") ?? "";
     const color = optionalString(input.color, "color") ?? "";
@@ -428,8 +583,9 @@ export class Repo {
   updateSolution(id: string, input: UpdateSolutionInput): Solution {
     const existing = this.getSolution(id);
     if (!existing) throw notFound("solution");
-    // A scoped key may mutate ONLY its own solution.
-    this.assertScope(existing.id);
+    // Mutating the solution itself needs a write grant on the whole solution
+    // (a project grant inside it is not enough).
+    this.assertScope(existing.id, { write: true });
     const name =
       input.name !== undefined ? requireString(input.name, "name") : existing.name;
     const description =
@@ -453,8 +609,9 @@ export class Repo {
   }
 
   deleteSolution(id: string): void {
-    // A scoped key may delete ONLY its own solution; out-of-scope (or missing) -> 403.
-    if (this.scopedSolutionId()) this.assertScope(this.getSolution(id)?.id);
+    // Deleting a solution needs a write grant on that whole solution.
+    if (this.restricted())
+      this.assertScope(this.getSolution(id)?.id, { write: true });
     const res = this.db.prepare(`DELETE FROM solutions WHERE id = ?`).run(id);
     if (res.changes === 0) throw notFound("solution");
   }
@@ -462,24 +619,32 @@ export class Repo {
   // --- projects ---
 
   listProjects(solutionId?: string): ProjectRollup[] {
-    // Scoped key: force the solution filter so projects of another solution are not
-    // enumerable. assertScope makes a mismatching explicit solutionId a hard 403,
-    // which is friendlier than silently returning the wrong set.
-    const scoped = this.scopedSolutionId();
-    if (scoped) {
-      if (solutionId !== undefined) this.assertScope(solutionId);
-      solutionId = scoped;
+    // Granted key + explicit solution: a solution entirely outside the grants is
+    // a hard 403 (friendlier than silently returning the wrong set); a partially
+    // covered one (project grants) narrows below to just the granted projects.
+    if (this.restricted() && solutionId !== undefined) {
+      this.assertScope(solutionId, { partial: true });
     }
     // Active projects on top, completed/archived at the bottom; newest first within a status group.
     const projectOrder =
       `ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 WHEN 'done' THEN 2 WHEN 'archived' THEN 3 ELSE 4 END ASC, createdAt DESC`;
-    const projects = (
-      solutionId
-        ? this.db
-            .prepare(`SELECT * FROM projects WHERE solutionId = ? ${projectOrder}`)
-            .all(solutionId)
-        : this.db.prepare(`SELECT * FROM projects ${projectOrder}`).all()
-    ) as unknown as Project[];
+    // Coverage filter: whole-solution grants pass their projects; otherwise only
+    // individually granted projects are enumerable.
+    const cov = this.coverageSql("solutionId", "id");
+    const where: string[] = [];
+    const params: string[] = [];
+    if (solutionId) {
+      where.push(`solutionId = ?`);
+      params.push(solutionId);
+    }
+    if (cov) {
+      where.push(cov.sql);
+      params.push(...cov.params);
+    }
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const projects = this.db
+      .prepare(`SELECT * FROM projects ${clause} ${projectOrder}`)
+      .all(...params) as unknown as Project[];
     const counts = this.groupedCounts(
       `SELECT m.projectId AS key, t.status AS status, COUNT(*) AS n
        FROM tasks t JOIN milestones m ON t.milestoneId = m.id
@@ -507,7 +672,7 @@ export class Repo {
   getProjectRollup(id: string): ProjectRollup | null {
     const project = this.getProject(id);
     if (!project) return null;
-    this.assertScope(project.solutionId);
+    this.assertScope(project.solutionId, { projectId: project.id });
     const sc = this.statusCountsWhere(
       `JOIN milestones m ON t.milestoneId = m.id WHERE m.projectId = ?`,
       [id],
@@ -525,8 +690,9 @@ export class Repo {
 
   createProject(input: CreateProjectInput): Project {
     const solutionId = requireString(input.solutionId, "solutionId");
-    // Scoped key: the new project must live in the key's solution.
-    this.assertScope(solutionId);
+    // Creating a project needs a write grant on the whole target solution
+    // (a grant on a sibling project does not allow creating new ones).
+    this.assertScope(solutionId, { write: true });
     if (!this.getSolution(solutionId)) throw notFound("solution");
     const name = requireString(input.name, "name");
     const description = optionalString(input.description, "description") ?? "";
@@ -551,7 +717,7 @@ export class Repo {
   updateProject(id: string, input: UpdateProjectInput): Project {
     const existing = this.getProject(id);
     if (!existing) throw notFound("project");
-    this.assertScope(existing.solutionId);
+    this.assertScope(existing.solutionId, { projectId: id, write: true });
     const name =
       input.name !== undefined ? requireString(input.name, "name") : existing.name;
     const description =
@@ -571,7 +737,11 @@ export class Repo {
   }
 
   deleteProject(id: string): void {
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForProject(id));
+    if (this.restricted())
+      this.assertScope(this.solutionIdForProject(id), {
+        projectId: id,
+        write: true,
+      });
     const res = this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
     if (res.changes === 0) throw notFound("project");
   }
@@ -579,8 +749,9 @@ export class Repo {
   // --- milestones ---
 
   listMilestones(projectId: string): MilestoneRollup[] {
-    // Scoped key: listing milestones of a project in another solution -> 403.
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForProject(projectId));
+    // Granted key: listing milestones of an uncovered project -> 403.
+    if (this.restricted())
+      this.assertScope(this.solutionIdForProject(projectId), { projectId });
     // Active milestones on top, completed/archived at the bottom; keep the manual
     // sequence (position, then createdAt) within each status group.
     const milestones = this.db
@@ -608,15 +779,22 @@ export class Repo {
   getMilestoneRollup(id: string): MilestoneRollup | null {
     const m = this.getMilestone(id);
     if (!m) return null;
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForMilestone(id));
+    if (this.restricted()) {
+      const owner = this.ownerOfMilestone(id);
+      this.assertScope(owner?.solutionId, { projectId: owner?.projectId });
+    }
     const sc = this.statusCountsWhere(`WHERE t.milestoneId = ?`, [id]);
     return { ...m, statusCounts: sc, progress: progressFromCounts(sc) };
   }
 
   createMilestone(input: CreateMilestoneInput): Milestone {
     const projectId = requireString(input.projectId, "projectId");
-    // Scoped key: the parent project must live in the key's solution.
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForProject(projectId));
+    // Granted key: the parent project must be covered by a write grant.
+    if (this.restricted())
+      this.assertScope(this.solutionIdForProject(projectId), {
+        projectId,
+        write: true,
+      });
     if (!this.getProject(projectId)) throw notFound("project");
     const title = requireString(input.title, "title");
     const description = optionalString(input.description, "description") ?? "";
@@ -660,7 +838,13 @@ export class Repo {
   private applyMilestoneUpdate(id: string, input: UpdateMilestoneInput): Milestone {
     const existing = this.getMilestone(id);
     if (!existing) throw notFound("milestone");
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForMilestone(id));
+    if (this.restricted()) {
+      const owner = this.ownerOfMilestone(id);
+      this.assertScope(owner?.solutionId, {
+        projectId: owner?.projectId,
+        write: true,
+      });
+    }
     const title =
       input.title !== undefined
         ? requireString(input.title, "title")
@@ -690,7 +874,13 @@ export class Repo {
   }
 
   deleteMilestone(id: string): void {
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForMilestone(id));
+    if (this.restricted()) {
+      const owner = this.ownerOfMilestone(id);
+      this.assertScope(owner?.solutionId, {
+        projectId: owner?.projectId,
+        write: true,
+      });
+    }
     const res = this.db.prepare(`DELETE FROM milestones WHERE id = ?`).run(id);
     if (res.changes === 0) throw notFound("milestone");
   }
@@ -740,19 +930,23 @@ export class Repo {
     ownerActorId?: string;
     limit?: number;
   }): Task[] {
-    // Scoped key: force the solution filter to the key's solution so it cannot
-    // enumerate tasks of another solution (ignoring/overriding a different caller value).
-    const scoped = this.scopedSolutionId();
-    if (scoped) filter = { ...filter, solutionId: scoped };
     const where: string[] = [];
     const params: (string | number)[] = [];
-    // projectId and solutionId require walking up the hierarchy.
+    // The projectId/solutionId filters and the grant-coverage predicate all walk
+    // up the hierarchy, so join as far as any of them needs. A granted key can
+    // only enumerate tasks of its covered solutions/projects, whatever the
+    // caller-supplied filters say.
+    const cov = this.coverageSql("p.solutionId", "m.projectId");
     const joins: string[] = [];
-    if (filter.projectId || filter.solutionId) {
+    if (filter.projectId || filter.solutionId || cov) {
       joins.push(`JOIN milestones m ON t.milestoneId = m.id`);
     }
-    if (filter.solutionId) {
+    if (filter.solutionId || cov) {
       joins.push(`JOIN projects p ON m.projectId = p.id`);
+    }
+    if (cov) {
+      where.push(cov.sql);
+      params.push(...cov.params);
     }
     if (filter.milestoneId) {
       where.push(`t.milestoneId = ?`);
@@ -855,9 +1049,6 @@ export class Repo {
   searchTasks(query: string, scope?: { solutionId?: string }): TaskWithContext[] {
     const q = requireString(query, "q").toLowerCase();
     const like = `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
-    // Scoped key: force the solution scope (override any caller-supplied value).
-    const scopedSolution = this.scopedSolutionId();
-    if (scopedSolution) scope = { solutionId: scopedSolution };
     const where = [
       `(LOWER(t.title) LIKE ? ESCAPE '\\' OR LOWER(t.description) LIKE ? ESCAPE '\\')`,
     ];
@@ -865,6 +1056,13 @@ export class Repo {
     if (scope?.solutionId) {
       where.push(`cl.id = ?`);
       params.push(scope.solutionId);
+    }
+    // Granted key: results stay within covered solutions/projects, whatever the
+    // caller-supplied scope says.
+    const cov = this.coverageSql("cl.id", "pr.id");
+    if (cov) {
+      where.push(cov.sql);
+      params.push(...cov.params);
     }
     const rows = this.db
       .prepare(
@@ -878,10 +1076,13 @@ export class Repo {
   getTask(id: string): Task | null {
     const row = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
     if (!row) return null;
-    // Scoped key: reading a task outside the key's solution -> 403. Guard only when
-    // a scoped key is in context (internal callers run without one, so this is a no-op
-    // for them and for admin/anonymous/unscoped requests).
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForTask(id) ?? undefined);
+    // Granted key: reading a task outside the covered solutions/projects -> 403.
+    // Guard only when a granted key is in context (internal callers run without
+    // one, so this is a no-op for them and for admin/anonymous requests).
+    if (this.restricted()) {
+      const owner = this.ownerOfTask(id);
+      this.assertScope(owner?.solutionId, { projectId: owner?.projectId });
+    }
     return this.withLabels([plain<Task>(row)])[0];
   }
 
@@ -898,8 +1099,14 @@ export class Repo {
 
   private insertTask(input: CreateTaskInput): Task {
     const milestoneId = requireString(input.milestoneId, "milestoneId");
-    // Scoped key: the parent milestone must live in the key's solution.
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForMilestone(milestoneId));
+    // Granted key: the parent milestone must be covered by a write grant.
+    if (this.restricted()) {
+      const owner = this.ownerOfMilestone(milestoneId);
+      this.assertScope(owner?.solutionId, {
+        projectId: owner?.projectId,
+        write: true,
+      });
+    }
     if (!this.getMilestone(milestoneId)) throw notFound("milestone");
 
     // Idempotency: a retry with the same clientRequestId returns the existing task.
@@ -991,8 +1198,14 @@ export class Repo {
   private applyUpdate(id: string, input: UpdateTaskInput): Task {
     const existing = this.getTask(id);
     if (!existing) throw notFound("task");
-    // Scoped key: may only touch a task in its own solution.
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForTask(id));
+    // Granted key: may only touch a task covered by a write grant.
+    if (this.restricted()) {
+      const owner = this.ownerOfTask(id);
+      this.assertScope(owner?.solutionId, {
+        projectId: owner?.projectId,
+        write: true,
+      });
+    }
     const milestoneId =
       input.milestoneId !== undefined
         ? requireString(input.milestoneId, "milestoneId")
@@ -1000,10 +1213,14 @@ export class Repo {
     if (input.milestoneId !== undefined && !this.getMilestone(milestoneId)) {
       throw notFound("milestone");
     }
-    // Moving a task: the destination milestone must also live in the key's solution
-    // (otherwise a scoped key could shove a task into another solution).
-    if (this.scopedSolutionId() && input.milestoneId !== undefined) {
-      this.assertScope(this.solutionIdForMilestone(milestoneId));
+    // Moving a task: the destination milestone must also be write-covered
+    // (otherwise a granted key could shove a task outside its grants).
+    if (this.restricted() && input.milestoneId !== undefined) {
+      const dest = this.ownerOfMilestone(milestoneId);
+      this.assertScope(dest?.solutionId, {
+        projectId: dest?.projectId,
+        write: true,
+      });
     }
     const title =
       input.title !== undefined
@@ -1131,8 +1348,14 @@ export class Repo {
 
   deleteTask(id: string): void {
     const solutionId = this.solutionIdForTask(id);
-    // Scoped key: may only delete a task in its own solution.
-    if (this.scopedSolutionId()) this.assertScope(solutionId ?? undefined);
+    // Granted key: may only delete a task covered by a write grant.
+    if (this.restricted()) {
+      const owner = this.ownerOfTask(id);
+      this.assertScope(owner?.solutionId, {
+        projectId: owner?.projectId,
+        write: true,
+      });
+    }
     const ms = this.db
       .prepare(`SELECT milestoneId AS m FROM tasks WHERE id = ?`)
       .get(id) as { m: string } | undefined;
@@ -1387,10 +1610,13 @@ export class Repo {
   // --- comments ---
 
   listComments(taskId: string): Comment[] {
-    // Scoped key: only comments on a task in the key's solution. Guarded inside the
-    // scoped-key branch so the (frequent) internal calls and admin/anonymous reads
-    // stay free of the extra lookup.
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForTask(taskId) ?? undefined);
+    // Granted key: only comments on a covered task. Guarded inside the
+    // restricted branch so the (frequent) internal calls and admin/anonymous
+    // reads stay free of the extra lookup.
+    if (this.restricted()) {
+      const owner = this.ownerOfTask(taskId);
+      this.assertScope(owner?.solutionId, { projectId: owner?.projectId });
+    }
     return (
       this.db
         .prepare(`SELECT * FROM comments WHERE taskId = ? ORDER BY createdAt ASC`)
@@ -1401,8 +1627,14 @@ export class Repo {
   createComment(taskId: string, input: CreateCommentInput): Comment {
     return this.transaction(() => {
       if (!this.getTask(taskId)) throw notFound("task");
-      // Scoped key: may only comment on a task in its own solution.
-      if (this.scopedSolutionId()) this.assertScope(this.solutionIdForTask(taskId) ?? undefined);
+      // Granted key: may only comment on a task covered by a write grant.
+      if (this.restricted()) {
+        const owner = this.ownerOfTask(taskId);
+        this.assertScope(owner?.solutionId, {
+          projectId: owner?.projectId,
+          write: true,
+        });
+      }
       const body = requireString(input.body, "body");
       const author = optionalString(input.author, "author") ?? "";
       const id = genId(ID_PREFIX.comment);
@@ -1426,7 +1658,13 @@ export class Repo {
   }
 
   deleteComment(id: string): void {
-    if (this.scopedSolutionId()) this.assertScope(this.solutionIdForComment(id));
+    if (this.restricted()) {
+      const owner = this.ownerOfComment(id);
+      this.assertScope(owner?.solutionId, {
+        projectId: owner?.projectId,
+        write: true,
+      });
+    }
     const res = this.db.prepare(`DELETE FROM comments WHERE id = ?`).run(id);
     if (res.changes === 0) throw notFound("comment");
   }
@@ -1479,12 +1717,17 @@ export class Repo {
       limit?: number;
     } = {},
   ): Activity[] {
-    // Scoped key: force the solution filter so the audit log of another solution
-    // is not enumerable (override a different caller-supplied value).
-    const scoped = this.scopedSolutionId();
-    if (scoped) filter = { ...filter, solutionId: scoped };
     const where: string[] = [];
     const params: (string | number)[] = [];
+    // Granted key: the audit log is solution-grained (activity rows carry only a
+    // solutionId), so filter to the covered solutions - including ones covered
+    // partially via a project grant.
+    const covered = this.coveredSolutionIds();
+    if (covered) {
+      const c = Repo.inClause("solutionId", covered);
+      where.push(c.sql);
+      params.push(...c.params);
+    }
     if (filter.solutionId) {
       where.push(`solutionId = ?`);
       params.push(filter.solutionId);
@@ -1544,8 +1787,32 @@ export class Repo {
 
   // --- api keys ---
 
+  /** Stored grants JSON -> KeyGrant[]. Legacy rows (NULL / malformed) derive a
+   *  single grant from the solutionId+scope columns, so every key resolves to a
+   *  grant list and the enforcement machinery has one shape to reason about. */
+  private static grantsFromRow(row: {
+    grants?: string | null;
+    solutionId: string | null;
+    scope: KeyScope;
+  }): KeyGrant[] {
+    const raw = (row as { grants?: string | null }).grants;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as KeyGrant[];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        // fall through to the legacy derivation on malformed JSON
+      }
+    }
+    return [
+      { ...(row.solutionId ? { solutionId: row.solutionId } : {}), scope: row.scope },
+    ];
+  }
+
   /** Key row -> public shape (WITHOUT secretHash). */
-  private toPublicKey(row: ApiKey & { secretHash?: string }): ApiKey {
+  private toPublicKey(
+    row: Omit<ApiKey, "grants"> & { grants?: string | null; secretHash?: string },
+  ): ApiKey {
     return {
       id: row.id,
       actorId: row.actorId,
@@ -1553,12 +1820,75 @@ export class Repo {
       name: row.name,
       prefix: row.prefix,
       scope: row.scope,
+      grants: Repo.grantsFromRow(row),
       expiresAt: row.expiresAt ?? null,
       createdByKeyId: row.createdByKeyId ?? null,
       lastUsedAt: row.lastUsedAt ?? null,
       revokedAt: row.revokedAt ?? null,
       createdAt: row.createdAt,
     };
+  }
+
+  /**
+   * Validates and normalizes the grants of a new key. Explicit `grants` win;
+   * otherwise the legacy solutionId+scope pair becomes a single grant (global
+   * write by default - unchanged historical behavior). Each grant targets one
+   * project, one whole solution, or everything (neither id).
+   */
+  private normalizeKeyGrants(input: CreateApiKeyInput): KeyGrant[] {
+    const defaultScope: KeyScope =
+      input.scope !== undefined
+        ? enumValue(input.scope, KEY_SCOPES, "scope")
+        : "write";
+    if (input.grants === undefined) {
+      const solutionId = optionalString(input.solutionId, "solutionId") ?? null;
+      if (solutionId) {
+        if (!this.getSolution(solutionId)) throw notFound("solution");
+        return [{ solutionId, scope: defaultScope }];
+      }
+      return [{ scope: defaultScope }];
+    }
+    if (!Array.isArray(input.grants) || input.grants.length === 0) {
+      throw unprocessable(`Field "grants" must be a non-empty array`);
+    }
+    return input.grants.map((raw, i) => {
+      if (typeof raw !== "object" || raw === null) {
+        throw unprocessable(`Field "grants[${i}]" must be an object`);
+      }
+      const scope: KeyScope =
+        raw.scope !== undefined
+          ? enumValue(raw.scope, KEY_SCOPES, `grants[${i}].scope`)
+          : defaultScope;
+      const solutionId = optionalString(raw.solutionId, `grants[${i}].solutionId`);
+      const projectId = optionalString(raw.projectId, `grants[${i}].projectId`);
+      if (solutionId && projectId) {
+        throw unprocessable(
+          `Field "grants[${i}]" must target a solution OR a project, not both`,
+        );
+      }
+      if (solutionId && !this.getSolution(solutionId)) throw notFound("solution");
+      if (projectId && !this.getProject(projectId)) throw notFound("project");
+      return {
+        ...(solutionId ? { solutionId } : {}),
+        ...(projectId ? { projectId } : {}),
+        scope,
+      };
+    });
+  }
+
+  /** True when the parent grant covers the child grant (delegation cannot widen:
+   *  neither the target nor the rights). */
+  private grantCoversGrant(parent: KeyGrant, child: KeyGrant): boolean {
+    if (parent.scope === "read" && child.scope === "write") return false;
+    if (Repo.isGlobalGrant(parent)) return true;
+    if (parent.solutionId) {
+      if (child.solutionId === parent.solutionId) return true;
+      return (
+        !!child.projectId &&
+        this.solutionIdForProject(child.projectId) === parent.solutionId
+      );
+    }
+    return !!child.projectId && child.projectId === parent.projectId;
   }
 
   /**
@@ -1577,10 +1907,16 @@ export class Repo {
       );
       actorId = this.createActor({ kind: "agent", name: actorName }).id;
     }
-    const solutionId = optionalString(input.solutionId, "solutionId") ?? null;
-    if (solutionId && !this.getSolution(solutionId)) throw notFound("solution");
-    const scope: KeyScope =
-      input.scope !== undefined ? enumValue(input.scope, KEY_SCOPES, "scope") : "write";
+    // The key's access = a list of grants chosen at creation (several places,
+    // each with its own rights). Legacy solutionId+scope input maps to one grant.
+    const grants = this.normalizeKeyGrants(input);
+    // Legacy display columns, derived: aggregate scope ("write" when any grant
+    // writes) and the single solution target when that is the whole grant list.
+    const scope: KeyScope = grants.some((g) => g.scope === "write")
+      ? "write"
+      : "read";
+    const solutionId =
+      grants.length === 1 ? (grants[0].solutionId ?? null) : null;
 
     let expiresAt: string | null = optionalString(input.expiresAt, "expiresAt") ?? null;
     if (expiresAt) {
@@ -1594,20 +1930,20 @@ export class Repo {
       expiresAt = new Date(Date.now() + input.ttlSeconds * 1000).toISOString();
     }
 
-    // Delegation cannot widen permissions: a child key minted by a parent key
-    // cannot exceed its scope/solution/lifetime.
+    // Delegation cannot widen permissions: every grant of a child key minted by
+    // a parent key must be covered by one of the parent's grants (target and
+    // rights), and the child's lifetime cannot exceed the parent's.
     const callerKeyId = currentContext().keyId;
     if (callerKeyId) {
       const parent = this.getApiKey(callerKeyId);
       if (parent) {
-        if (parent.scope === "read" && scope === "write") {
-          throw new AppError(403, "A read key cannot create a write key");
-        }
-        if (parent.solutionId && solutionId !== parent.solutionId) {
-          throw new AppError(
-            403,
-            "A solution-scoped key cannot create a key outside that solution",
-          );
+        for (const child of grants) {
+          if (!parent.grants.some((pg) => this.grantCoversGrant(pg, child))) {
+            throw new AppError(
+              403,
+              "A delegated key cannot exceed the parent key's grants",
+            );
+          }
         }
         // the child's lifetime does not exceed the parent's (hard clamp)
         if (parent.expiresAt && (!expiresAt || expiresAt > parent.expiresAt)) {
@@ -1621,8 +1957,8 @@ export class Repo {
     this.db
       .prepare(
         `INSERT INTO api_keys
-          (id, actorId, solutionId, name, prefix, secretHash, scope, expiresAt, createdByKeyId, lastUsedAt, revokedAt, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, actorId, solutionId, name, prefix, secretHash, scope, grants, expiresAt, createdByKeyId, lastUsedAt, revokedAt, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1632,13 +1968,20 @@ export class Repo {
         prefix,
         secretHash,
         scope,
+        JSON.stringify(grants),
         expiresAt,
         currentContext().keyId ?? null,
         null,
         null,
         now(),
       );
-    this.recordActivity("apikey", id, "create", `key ${prefix} (${scope})`, solutionId);
+    this.recordActivity(
+      "apikey",
+      id,
+      "create",
+      `key ${prefix} (${describeGrants(grants)})`,
+      solutionId,
+    );
     const created = this.getApiKey(id)!;
     return { ...created, token };
   }
@@ -1651,11 +1994,6 @@ export class Repo {
   }
 
   listApiKeys(filter: { actorId?: string; solutionId?: string } = {}): ApiKey[] {
-    // A solution-scoped key may only see keys of its own solution (admin/anonymous
-    // operator and unscoped keys are unrestricted). Force the filter to the key's
-    // solution, overriding any caller-supplied value.
-    const scoped = this.scopedSolutionId();
-    if (scoped) filter = { ...filter, solutionId: scoped };
     const where: string[] = [];
     const params: string[] = [];
     if (filter.actorId) {
@@ -1667,11 +2005,27 @@ export class Repo {
       params.push(filter.solutionId);
     }
     const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    return (
+    const keys = (
       this.db
         .prepare(`SELECT ${API_KEY_PUBLIC_COLS} FROM api_keys ${clause} ORDER BY createdAt DESC`)
         .all(...params) as object[]
     ).map((r) => this.toPublicKey(plain(r)));
+    // A granted key only sees keys whose grants touch its covered solutions;
+    // global keys stay visible to unrestricted callers only (admin/anonymous
+    // operator). Solution-grained: a key granted one project sees sibling keys
+    // of that project's solution.
+    const covered = this.coveredSolutionIds();
+    if (!covered) return keys;
+    const coveredSet = new Set(covered);
+    return keys.filter((k) =>
+      k.grants.some((g) =>
+        g.projectId
+          ? coveredSet.has(this.solutionIdForProject(g.projectId) ?? "")
+          : g.solutionId
+            ? coveredSet.has(g.solutionId)
+            : false,
+      ),
+    );
   }
 
   revokeApiKey(id: string): ApiKey {
@@ -1703,15 +2057,14 @@ export class Repo {
   resolveApiKey(token: string): {
     actorId: string;
     keyId: string;
-    solutionId: string | null;
-    scope: KeyScope;
+    grants: KeyGrant[];
   } | null {
     const parts = splitToken(token);
     if (!parts) return null;
     const row = this.db
       .prepare(`SELECT * FROM api_keys WHERE prefix = ?`)
       .get(parts.prefix) as
-      | (ApiKey & { secretHash: string })
+      | (Omit<ApiKey, "grants"> & { grants: string | null; secretHash: string })
       | undefined;
     if (!row) return null;
     // We check the secret BEFORE the key state, so the (public) prefix alone does
@@ -1733,8 +2086,7 @@ export class Repo {
     return {
       actorId: row.actorId,
       keyId: row.id,
-      solutionId: row.solutionId ?? null,
-      scope: row.scope,
+      grants: Repo.grantsFromRow(row),
     };
   }
 
@@ -1763,27 +2115,56 @@ export class Repo {
     // whole DB unbounded. Buckets stay ordered ascending by timestamp, so a client
     // that hits the cap simply advances its `since` cursor and pages forward.
     const cap = MAX_CHANGES_PER_BUCKET;
+    // Granted key: every bucket stays within the coverage. The solutions bucket
+    // is solution-grained (a project grant reveals its solution shell); deeper
+    // buckets filter precisely through their owning project.
+    const covered = this.coveredSolutionIds();
+    const covPh =
+      covered && covered.length ? covered.map(() => "?").join(",") : "NULL";
+    const solWhere = covered ? ` AND id IN (${covPh})` : ``;
+    const solParams = covered ?? [];
+    const cov = this.coverageSql("pr.solutionId", "pr.id");
+    const covWhere = cov ? ` AND ${cov.sql}` : ``;
+    const covParams = cov?.params ?? [];
     const solutions = this.db
-      .prepare(`SELECT * FROM solutions WHERE updatedAt >= ? ORDER BY updatedAt ASC LIMIT ?`)
-      .all(sinceIso, cap)
+      .prepare(
+        `SELECT * FROM solutions WHERE updatedAt >= ?${solWhere} ORDER BY updatedAt ASC LIMIT ?`,
+      )
+      .all(sinceIso, ...solParams, cap)
       .map((r) => plain<Solution>(r));
     const projects = this.db
-      .prepare(`SELECT * FROM projects WHERE updatedAt >= ? ORDER BY updatedAt ASC LIMIT ?`)
-      .all(sinceIso, cap)
+      .prepare(
+        `SELECT pr.* FROM projects pr WHERE pr.updatedAt >= ?${covWhere} ORDER BY pr.updatedAt ASC LIMIT ?`,
+      )
+      .all(sinceIso, ...covParams, cap)
       .map((r) => plain<Project>(r));
     const milestones = this.db
-      .prepare(`SELECT * FROM milestones WHERE updatedAt >= ? ORDER BY updatedAt ASC LIMIT ?`)
-      .all(sinceIso, cap)
+      .prepare(
+        `SELECT m.* FROM milestones m JOIN projects pr ON m.projectId = pr.id
+         WHERE m.updatedAt >= ?${covWhere} ORDER BY m.updatedAt ASC LIMIT ?`,
+      )
+      .all(sinceIso, ...covParams, cap)
       .map((r) => plain<Milestone>(r));
     const tasks = this.withLabels(
       this.db
-        .prepare(`SELECT * FROM tasks WHERE updatedAt >= ? ORDER BY updatedAt ASC LIMIT ?`)
-        .all(sinceIso, cap)
+        .prepare(
+          `SELECT t.* FROM tasks t
+           JOIN milestones ms ON t.milestoneId = ms.id
+           JOIN projects pr ON ms.projectId = pr.id
+           WHERE t.updatedAt >= ?${covWhere} ORDER BY t.updatedAt ASC LIMIT ?`,
+        )
+        .all(sinceIso, ...covParams, cap)
         .map((r) => plain<Task>(r)),
     );
     const comments = this.db
-      .prepare(`SELECT * FROM comments WHERE createdAt >= ? ORDER BY createdAt ASC LIMIT ?`)
-      .all(sinceIso, cap)
+      .prepare(
+        `SELECT c.* FROM comments c
+         JOIN tasks t ON c.taskId = t.id
+         JOIN milestones ms ON t.milestoneId = ms.id
+         JOIN projects pr ON ms.projectId = pr.id
+         WHERE c.createdAt >= ?${covWhere} ORDER BY c.createdAt ASC LIMIT ?`,
+      )
+      .all(sinceIso, ...covParams, cap)
       .map((r) => plain<Comment>(r));
     return { since: sinceIso, serverTime, solutions, projects, milestones, tasks, comments };
   }
@@ -1809,8 +2190,10 @@ export class Repo {
     return m;
   }
 
-  private attentionTasks(solutionId?: string): AttentionTask[] {
-    const solFilter = solutionId ? `cl.id = ? AND` : ``;
+  private attentionTasks(solutionIds?: string[]): AttentionTask[] {
+    const sid = solutionIds ?? [];
+    const ph = sid.length ? sid.map(() => "?").join(",") : "NULL";
+    const solFilter = solutionIds ? `cl.id IN (${ph}) AND` : ``;
     const rows = this.db
       .prepare(
         `SELECT ${TASK_CTX_SELECT}
@@ -1822,7 +2205,7 @@ export class Repo {
            t.updatedAt DESC
          LIMIT 50`,
       )
-      .all(...(solutionId ? [solutionId] : [])) as unknown as CtxRow[];
+      .all(...sid) as unknown as CtxRow[];
     const tasks = this.withLabels(rows.map(toTaskWithContext));
     // For blocked tasks attach the latest comment as `note` (the block reason).
     const notes = this.latestCommentBodies(
@@ -1835,9 +2218,11 @@ export class Repo {
     );
   }
 
-  private recentTasks(limit = 12, solutionId?: string): TaskWithContext[] {
-    const solWhere = solutionId ? `WHERE cl.id = ?` : ``;
-    const params: (string | number)[] = solutionId ? [solutionId, limit] : [limit];
+  private recentTasks(limit = 12, solutionIds?: string[]): TaskWithContext[] {
+    const sid = solutionIds ?? [];
+    const ph = sid.length ? sid.map(() => "?").join(",") : "NULL";
+    const solWhere = solutionIds ? `WHERE cl.id IN (${ph})` : ``;
+    const params: (string | number)[] = [...sid, limit];
     const rows = this.db
       .prepare(
         `SELECT ${TASK_CTX_SELECT} ${solWhere} ORDER BY t.updatedAt DESC, t.rowid DESC LIMIT ?`,
@@ -1864,22 +2249,25 @@ export class Repo {
    *  open (todo/in_progress/blocked) with >=1 done (i.e. 100%).
    *  When `solutionId` is given (solution-scoped key), counters cover only that
    *  solution; otherwise they are global. */
-  private completionCounts(solutionId?: string): DashboardPayload["completed"] {
-    // Restrict the entity universe (the outer FROM) to the scoped solution. The
-    // task tally is restricted via a join through projects to the same solution.
-    const sid = solutionId ? [solutionId] : [];
-    const tasksScope = solutionId
+  private completionCounts(
+    solutionIds?: string[],
+  ): DashboardPayload["completed"] {
+    // Restrict the entity universe (the outer FROM) to the covered solutions. The
+    // task tally is restricted via a join through projects to the same solutions.
+    const sid = solutionIds ?? [];
+    const ph = sid.length ? sid.map(() => "?").join(",") : "NULL";
+    const tasksScope = solutionIds
       ? `JOIN milestones m ON t.milestoneId = m.id
-         JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`
+         JOIN projects p ON m.projectId = p.id WHERE p.solutionId IN (${ph})`
       : ``;
-    const msWhere = solutionId
-      ? `JOIN projects pr ON m.projectId = pr.id WHERE pr.solutionId = ? AND`
+    const msWhere = solutionIds
+      ? `JOIN projects pr ON m.projectId = pr.id WHERE pr.solutionId IN (${ph}) AND`
       : `WHERE`;
-    const prWhere = solutionId ? `WHERE p.solutionId = ? AND` : `WHERE`;
-    const slWhere = solutionId ? `WHERE s.id = ? AND` : `WHERE`;
+    const prWhere = solutionIds ? `WHERE p.solutionId IN (${ph}) AND` : `WHERE`;
+    const slWhere = solutionIds ? `WHERE s.id IN (${ph}) AND` : `WHERE`;
     return {
       tasksDone: this.scalar(
-        `SELECT COUNT(*) AS n FROM tasks t ${tasksScope} ${solutionId ? "AND" : "WHERE"} t.status='done'`,
+        `SELECT COUNT(*) AS n FROM tasks t ${tasksScope} ${solutionIds ? "AND" : "WHERE"} t.status='done'`,
         sid,
       ),
       milestonesDone: this.scalar(
@@ -1916,13 +2304,16 @@ export class Repo {
    *  the "+1" animation from a specific row).
    *  When `solutionId` is given (solution-scoped key), only that solution's entities
    *  are listed; otherwise the result is global. */
-  private completedIds(solutionId?: string): DashboardPayload["completedIds"] {
-    const sid = solutionId ? [solutionId] : [];
-    const msWhere = solutionId
-      ? `JOIN projects pr ON m.projectId = pr.id WHERE pr.solutionId = ? AND`
+  private completedIds(
+    solutionIds?: string[],
+  ): DashboardPayload["completedIds"] {
+    const sid = solutionIds ?? [];
+    const ph = sid.length ? sid.map(() => "?").join(",") : "NULL";
+    const msWhere = solutionIds
+      ? `JOIN projects pr ON m.projectId = pr.id WHERE pr.solutionId IN (${ph}) AND`
       : `WHERE`;
-    const prWhere = solutionId ? `WHERE p.solutionId = ? AND` : `WHERE`;
-    const slWhere = solutionId ? `WHERE s.id = ? AND` : `WHERE`;
+    const prWhere = solutionIds ? `WHERE p.solutionId IN (${ph}) AND` : `WHERE`;
+    const slWhere = solutionIds ? `WHERE s.id IN (${ph}) AND` : `WHERE`;
     return {
       milestones: this.idList(
         `SELECT m.id AS id FROM milestones m
@@ -1968,23 +2359,26 @@ export class Repo {
    */
   private completedToday(
     nowDate = new Date(),
-    solutionId?: string,
+    solutionIds?: string[],
   ): DashboardPayload["completedToday"] {
     const startIso = this.startOfTodayIso(nowDate);
     const maxDoneToday = (scope: string) =>
       `(SELECT MAX(t.completedAt) FROM tasks t ${scope} AND t.status='done') >= ?`;
-    // Outer-entity scope for the solution-scoped key. The solution params come
-    // first because they bind the leading WHERE clause; the startIso params bind
-    // the trailing completedAt comparisons (placeholder order).
-    const sid = solutionId ? [solutionId] : [];
-    const taskSolJoin = solutionId
+    // Outer-entity scope for the granted key. The solution params come first
+    // because they bind the leading WHERE clause; the startIso params bind the
+    // trailing completedAt comparisons (placeholder order).
+    const sid = solutionIds ?? [];
+    const ph = sid.length ? sid.map(() => "?").join(",") : "NULL";
+    const taskSolJoin = solutionIds
       ? `JOIN milestones m ON t.milestoneId = m.id
-         JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ? AND`
+         JOIN projects p ON m.projectId = p.id WHERE p.solutionId IN (${ph}) AND`
       : `WHERE`;
-    const msSolJoin = solutionId
-      ? `JOIN projects pr ON m.projectId = pr.id WHERE pr.solutionId = ? AND`
+    const msSolJoin = solutionIds
+      ? `JOIN projects pr ON m.projectId = pr.id WHERE pr.solutionId IN (${ph}) AND`
       : `WHERE`;
-    const prSolWhere = solutionId ? `WHERE p.solutionId = ? AND` : `WHERE`;
+    const prSolWhere = solutionIds
+      ? `WHERE p.solutionId IN (${ph}) AND`
+      : `WHERE`;
     return {
       tasks: this.scalar(
         `SELECT COUNT(*) AS n FROM tasks t ${taskSolJoin}
@@ -2022,16 +2416,16 @@ export class Repo {
    * "TODAY" boundary used elsewhere). Capped to the most recent DAILY_CHART_MAX_DAYS
    * days that have transitions; fewer days -> all of them.
    *
-   * Scope: when `solutionId` is set (a solution-scoped key), the query filters on
+   * Scope: when `solutionIds` is set (a granted key), the query filters on
    * activity.solutionId (stamped at record time to the task's solution), so the chart
-   * only ever exposes the key's own solution, exactly like the rest of getDashboard.
+   * only ever exposes the key's covered solutions, exactly like the rest of getDashboard.
    * `statuses` lists only the statuses with transitions in the window, in canonical
    * STATUS_ORDER; the UI owns each status' color and label.
    */
-  private dailyByStatus(solutionId?: string): DailyByStatus {
-    const params: (string | number)[] = [];
-    const solWhere = solutionId ? `AND solutionId = ?` : ``;
-    if (solutionId) params.push(solutionId);
+  private dailyByStatus(solutionIds?: string[]): DailyByStatus {
+    const params: (string | number)[] = [...(solutionIds ?? [])];
+    const ph = params.length ? params.map(() => "?").join(",") : "NULL";
+    const solWhere = solutionIds ? `AND solutionId IN (${ph})` : ``;
     const rows = this.db
       .prepare(
         `SELECT date(at) AS day, summary, COUNT(*) AS c
@@ -2081,11 +2475,12 @@ export class Repo {
   }
 
   getDashboard(): DashboardPayload {
-    // Solution-scoped key: the whole dashboard reflects ONLY that solution. When
-    // unset (admin/unscoped/anonymous/internal callers) every figure is global,
-    // exactly as before. listSolutions/listProjects/recentTasksForSolution already
-    // self-scope; the remaining totals, counts and feeds take the scoped id below.
-    const scoped = this.scopedSolutionId();
+    // Granted key: the whole dashboard reflects only the covered solutions.
+    // Deliberately solution-grained - a project grant reveals its solution's
+    // aggregate figures (see coveredSolutionIds); the entity lists nested below
+    // (listProjects etc.) still enforce the precise per-project coverage. When
+    // unrestricted every figure is global, exactly as before.
+    const covered = this.coveredSolutionIds();
     const solutions = this.listSolutions();
     const dashSolutions: DashboardSolution[] = solutions.map((c) => ({
       ...c,
@@ -2093,35 +2488,37 @@ export class Repo {
       recentTasks: this.recentTasksForSolution(c.id, 5),
     }));
 
-    const countsWhere = scoped
+    const ph =
+      covered && covered.length ? covered.map(() => "?").join(",") : "NULL";
+    const countsWhere = covered
       ? this.statusCountsWhere(
           `JOIN milestones m ON t.milestoneId = m.id
-           JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
-          [scoped],
+           JOIN projects p ON m.projectId = p.id WHERE p.solutionId IN (${ph})`,
+          covered,
         )
       : this.statusCountsWhere("", []);
-    // Pick the scoped (solution-filtered) or global COUNT query and run it with the
-    // right params, so each total below is a single expression instead of a ternary.
-    const total = (scopedSql: string, globalSql: string) =>
-      scoped ? this.scalar(scopedSql, [scoped]) : this.scalar(globalSql);
+    // Pick the covered (solution-filtered) or global COUNT query and run it with
+    // the right params, so each total below is a single expression instead of a ternary.
+    const total = (coveredSql: string, globalSql: string) =>
+      covered ? this.scalar(coveredSql, covered) : this.scalar(globalSql);
     const totals = {
       solutions: total(
-        `SELECT COUNT(*) AS n FROM solutions WHERE id = ?`,
+        `SELECT COUNT(*) AS n FROM solutions WHERE id IN (${ph})`,
         `SELECT COUNT(*) AS n FROM solutions`,
       ),
       projects: total(
-        `SELECT COUNT(*) AS n FROM projects WHERE solutionId = ?`,
+        `SELECT COUNT(*) AS n FROM projects WHERE solutionId IN (${ph})`,
         `SELECT COUNT(*) AS n FROM projects`,
       ),
       milestones: total(
         `SELECT COUNT(*) AS n FROM milestones m
-         JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
+         JOIN projects p ON m.projectId = p.id WHERE p.solutionId IN (${ph})`,
         `SELECT COUNT(*) AS n FROM milestones`,
       ),
       tasks: total(
         `SELECT COUNT(*) AS n FROM tasks t
          JOIN milestones m ON t.milestoneId = m.id
-         JOIN projects p ON m.projectId = p.id WHERE p.solutionId = ?`,
+         JOIN projects p ON m.projectId = p.id WHERE p.solutionId IN (${ph})`,
         `SELECT COUNT(*) AS n FROM tasks`,
       ),
     };
@@ -2130,13 +2527,13 @@ export class Repo {
       totals,
       statusCounts: countsWhere,
       progress: progressFromCounts(countsWhere),
-      completed: this.completionCounts(scoped),
-      completedIds: this.completedIds(scoped),
-      completedToday: this.completedToday(new Date(), scoped),
+      completed: this.completionCounts(covered),
+      completedIds: this.completedIds(covered),
+      completedToday: this.completedToday(new Date(), covered),
       solutions: dashSolutions,
-      attention: this.attentionTasks(scoped),
-      recent: this.recentTasks(12, scoped),
-      dailyByStatus: this.dailyByStatus(scoped),
+      attention: this.attentionTasks(covered),
+      recent: this.recentTasks(12, covered),
+      dailyByStatus: this.dailyByStatus(covered),
     };
   }
 }

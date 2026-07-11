@@ -658,12 +658,25 @@ const TOOLS = [
   {
     name: "fs_mint_agent_key",
     description:
-      "Mint an API key for a sub-agent (delegation). Creates a new 'agent' actor with the given name and returns a token (shown ONCE) to pass to the sub-agent in its FS_API_KEY. Narrow it with `solutionId` and `scope`, set `ttlSeconds` (e.g. 7200 = 2h) so the key expires after the work. The parent (your key) is recorded as createdByKeyId.",
+      "Mint an API key for a sub-agent (delegation). Creates a new 'agent' actor with the given name and returns a token (shown ONCE) to pass to the sub-agent in its FS_API_KEY. Narrow it with `grants` - a list of places, each with its own rights: {solutionId} = a whole solution, {projectId} = one project, neither = global; scope read|write per grant (default write). Every grant must fit inside YOUR key's grants (delegation cannot widen). Legacy shorthand: top-level `solutionId`+`scope` = one grant. Set `ttlSeconds` (e.g. 7200 = 2h) so the key expires after the work. The parent (your key) is recorded as createdByKeyId.",
     inputSchema: {
       type: "object",
       properties: {
         actorName: { type: "string", description: "Sub-agent name (e.g. 'voice-eval-worker')." },
-        solutionId: { type: "string", description: "Optional narrowing to a solution." },
+        grants: {
+          type: "array",
+          description:
+            "Access grants: several places, each with its own rights. One of solutionId/projectId per grant (neither = global).",
+          items: {
+            type: "object",
+            properties: {
+              solutionId: { type: "string", description: "Whole solution (all its projects)." },
+              projectId: { type: "string", description: "One project." },
+              scope: { type: "string", enum: ["read", "write"], description: "Rights on this place (default write)." },
+            },
+          },
+        },
+        solutionId: { type: "string", description: "Legacy shorthand: single-solution grant (use `grants` instead)." },
         scope: { type: "string", enum: ["read", "write"] },
         ttlSeconds: { type: "number", description: "Key lifetime in seconds (e.g. 7200)." },
         name: { type: "string", description: "Key label (optional)." },
@@ -675,6 +688,7 @@ const TOOLS = [
         method: "POST",
         body: JSON.stringify({
           actorName: a.actorName,
+          grants: a.grants,
           solutionId: a.solutionId,
           scope: a.scope,
           ttlSeconds: a.ttlSeconds,
@@ -685,7 +699,7 @@ const TOOLS = [
   {
     name: "fs_list_keys",
     description:
-      "List API keys (without the secret). Filter by actorId or solutionId. Shows the prefix, scope, solution, expiry, lastUsedAt, and revokedAt - who has access and with what.",
+      "List API keys (without the secret). Filter by actorId or solutionId. Shows the prefix, grants (places + rights), expiry, lastUsedAt, and revokedAt - who has access and with what.",
     inputSchema: {
       type: "object",
       properties: {

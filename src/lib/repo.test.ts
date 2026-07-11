@@ -7,6 +7,7 @@ import { createDatabase } from "./db";
 import { Repo } from "./repo";
 import { AppError } from "./errors";
 import { runWithContext } from "./context";
+import type { KeyGrant } from "./types";
 
 function freshRepo(): Repo {
   return new Repo(createDatabase(":memory:"));
@@ -765,7 +766,7 @@ describe("Repo - solution-scope enforcement (scoped key)", () => {
   });
 
   const scoped = <T>(solutionId: string, fn: () => T): T =>
-    runWithContext({ keySolutionId: solutionId, keyScope: "write" }, fn);
+    runWithContext({ keyGrants: [{ solutionId, scope: "write" }] }, fn);
   const expect403 = (fn: () => unknown) => {
     try {
       fn();
@@ -829,6 +830,196 @@ describe("Repo - solution-scope enforcement (scoped key)", () => {
     runWithContext({ keyId: "k1", actorId: "a1" }, () => {
       expect(repo.getMilestoneRollup(msB)).not.toBeNull();
     });
+  });
+});
+
+describe("Repo - API key grants (multi-target)", () => {
+  let repo: Repo;
+  let solA: string;
+  let solB: string;
+  let pA1: string;
+  let pA2: string;
+  let pB: string;
+  let msA1: string;
+  let msA2: string;
+  let msB: string;
+  let tA1: string;
+  let tA2: string;
+  let tB: string;
+  beforeEach(() => {
+    repo = freshRepo();
+    solA = repo.createSolution({ name: "A" }).id;
+    solB = repo.createSolution({ name: "B" }).id;
+    pA1 = repo.createProject({ solutionId: solA, name: "PA1" }).id;
+    pA2 = repo.createProject({ solutionId: solA, name: "PA2" }).id;
+    pB = repo.createProject({ solutionId: solB, name: "PB" }).id;
+    msA1 = repo.createMilestone({ projectId: pA1, title: "MA1" }).id;
+    msA2 = repo.createMilestone({ projectId: pA2, title: "MA2" }).id;
+    msB = repo.createMilestone({ projectId: pB, title: "MB" }).id;
+    tA1 = repo.createTask({ milestoneId: msA1, title: "task A1" }).id;
+    tA2 = repo.createTask({ milestoneId: msA2, title: "task A2" }).id;
+    tB = repo.createTask({ milestoneId: msB, title: "task B" }).id;
+  });
+
+  const withGrants = <T>(grants: KeyGrant[], fn: () => T): T =>
+    runWithContext({ keyGrants: grants }, fn);
+  const expect403 = (fn: () => unknown) => {
+    try {
+      fn();
+      throw new Error("should have thrown 403");
+    } catch (e) {
+      expect((e as AppError).status).toBe(403);
+    }
+  };
+
+  it("a project grant covers exactly its project", () => {
+    const g: KeyGrant[] = [{ projectId: pA1, scope: "write" }];
+    // inside the granted project: full write
+    expect(
+      withGrants(g, () => repo.updateTask(tA1, { status: "in_progress" })).status,
+    ).toBe("in_progress");
+    expect(
+      withGrants(g, () => repo.createTask({ milestoneId: msA1, title: "ok" })).title,
+    ).toBe("ok");
+    expect(
+      withGrants(g, () => repo.createMilestone({ projectId: pA1, title: "m" })).title,
+    ).toBe("m");
+    // sibling project of the same solution: no access
+    expect403(() => withGrants(g, () => repo.updateTask(tA2, { status: "done" })));
+    expect403(() => withGrants(g, () => repo.getTask(tB)));
+    // the solution container itself is read-only shell: no mutations, no siblings
+    expect403(() => withGrants(g, () => repo.updateSolution(solA, { name: "x" })));
+    expect403(() =>
+      withGrants(g, () => repo.createProject({ solutionId: solA, name: "new" })),
+    );
+  });
+
+  it("lists are narrowed to the granted projects", () => {
+    const g: KeyGrant[] = [{ projectId: pA1, scope: "read" }];
+    expect(withGrants(g, () => repo.listSolutions()).map((s) => s.id)).toEqual([
+      solA,
+    ]);
+    expect(
+      withGrants(g, () => repo.listProjects(solA)).map((p) => p.id),
+    ).toEqual([pA1]);
+    expect(withGrants(g, () => repo.listProjects()).map((p) => p.id)).toEqual([
+      pA1,
+    ]);
+    const tasks = withGrants(g, () => repo.listTasks({ solutionId: solA }));
+    expect(tasks.map((t) => t.id)).toEqual([tA1]);
+    const hits = withGrants(g, () => repo.searchTasks("task"));
+    expect(hits.map((t) => t.id)).toEqual([tA1]);
+  });
+
+  it("mixed grants: write only where granted write", () => {
+    const g: KeyGrant[] = [
+      { projectId: pA1, scope: "write" },
+      { projectId: pA2, scope: "read" },
+    ];
+    expect(
+      withGrants(g, () => repo.updateTask(tA1, { status: "done" })).status,
+    ).toBe("done");
+    // read grant lets it see, not touch
+    expect(withGrants(g, () => repo.getTask(tA2))!.id).toBe(tA2);
+    expect403(() => withGrants(g, () => repo.updateTask(tA2, { status: "done" })));
+  });
+
+  it("a solution grant covers all of the solution's projects", () => {
+    const g: KeyGrant[] = [{ solutionId: solA, scope: "write" }];
+    expect(
+      withGrants(g, () => repo.updateTask(tA2, { status: "done" })).status,
+    ).toBe("done");
+    expect(
+      withGrants(g, () => repo.listProjects(solA)).map((p) => p.id).sort(),
+    ).toEqual([pA1, pA2].sort());
+    expect403(() => withGrants(g, () => repo.getTask(tB)));
+  });
+
+  it("creates a key with several grants; legacy display fields are derived", () => {
+    const multi = repo.createApiKey({
+      actorName: "multi",
+      grants: [{ solutionId: solA }, { projectId: pB, scope: "read" }],
+    });
+    expect(multi.grants).toEqual([
+      { solutionId: solA, scope: "write" },
+      { projectId: pB, scope: "read" },
+    ]);
+    expect(multi.scope).toBe("write"); // aggregate: any write grant
+    expect(multi.solutionId).toBeNull(); // more than one target -> no single solution
+    const single = repo.createApiKey({
+      actorName: "single",
+      grants: [{ solutionId: solB, scope: "read" }],
+    });
+    expect(single.scope).toBe("read");
+    expect(single.solutionId).toBe(solB);
+  });
+
+  it("validates grants (422/404)", () => {
+    const status = (fn: () => unknown) => {
+      try {
+        fn();
+        return 200;
+      } catch (e) {
+        return (e as AppError).status;
+      }
+    };
+    expect(status(() => repo.createApiKey({ actorName: "x", grants: [] }))).toBe(422);
+    expect(
+      status(() =>
+        repo.createApiKey({
+          actorName: "x",
+          grants: [{ solutionId: solA, projectId: pA1 }],
+        }),
+      ),
+    ).toBe(422);
+    expect(
+      status(() =>
+        repo.createApiKey({ actorName: "x", grants: [{ projectId: "pr_nope" }] }),
+      ),
+    ).toBe(404);
+  });
+
+  it("delegation: every child grant must fit inside the parent's", () => {
+    const parent = repo.createApiKey({
+      actorName: "parent",
+      grants: [{ solutionId: solA, scope: "write" }],
+    });
+    const mintAs = (grants: KeyGrant[]) =>
+      runWithContext(
+        { keyId: parent.id, actorId: parent.actorId, keyGrants: parent.grants },
+        () => repo.createApiKey({ actorId: parent.actorId, grants }),
+      );
+    // a project inside the parent's solution: OK (narrowing)
+    expect(mintAs([{ projectId: pA1, scope: "write" }]).grants).toEqual([
+      { projectId: pA1, scope: "write" },
+    ]);
+    // another solution: 403
+    expect403(() => mintAs([{ solutionId: solB, scope: "read" }]));
+    // widening to global: 403
+    expect403(() => mintAs([{ scope: "read" }]));
+    // a read parent cannot mint write
+    const readParent = repo.createApiKey({
+      actorName: "rp",
+      grants: [{ projectId: pA1, scope: "read" }],
+    });
+    const mintAsRead = (grants: KeyGrant[]) =>
+      runWithContext(
+        {
+          keyId: readParent.id,
+          actorId: readParent.actorId,
+          keyGrants: readParent.grants,
+        },
+        () => repo.createApiKey({ actorId: readParent.actorId, grants }),
+      );
+    expect403(() => mintAsRead([{ projectId: pA1, scope: "write" }]));
+    expect(mintAsRead([{ projectId: pA1, scope: "read" }]).scope).toBe("read");
+  });
+
+  it("legacy keys (no grants column) behave as one solution grant", () => {
+    const legacy = repo.createApiKey({ actorName: "old", solutionId: solA });
+    expect(legacy.grants).toEqual([{ solutionId: solA, scope: "write" }]);
+    const global = repo.createApiKey({ actorName: "g", scope: "read" });
+    expect(global.grants).toEqual([{ scope: "read" }]);
   });
 });
 
@@ -1436,7 +1627,7 @@ describe("Repo - dailyByStatus (live daily chart data)", () => {
 
     // A key scoped to solution A sees ONLY A's transitions and days.
     const scoped = runWithContext(
-      { keySolutionId: sA.id, keyScope: "read" },
+      { keyGrants: [{ solutionId: sA.id, scope: "read" }] },
       () => repo.getDashboard().dailyByStatus,
     );
     expect(scoped.days).toEqual(["2026-05-01"]);

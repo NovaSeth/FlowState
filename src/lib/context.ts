@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { KeyGrant } from "./types";
 
 /**
  * Request-scoped identity context. route() resolves the actor from the x-api-key
@@ -9,8 +10,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export type RequestContext = {
   actorId?: string;
   keyId?: string;
-  keySolutionId?: string;
-  keyScope?: "read" | "write";
+  /** Grants of the authenticated key; undefined = unrestricted (admin key,
+   *  trusted keyless local client, or internal callers). */
+  keyGrants?: KeyGrant[];
   /** true when authenticated with the admin key (FS_API_KEY). */
   admin?: boolean;
 };

@@ -13,6 +13,7 @@ export default function UsersPage() {
       initialActors={r.listActors()}
       initialKeys={r.listApiKeys()}
       initialSolutions={r.listSolutions()}
+      initialProjects={r.listProjects()}
     />
   );
 }

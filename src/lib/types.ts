@@ -180,6 +180,23 @@ export type KeyScope = "read" | "write";
 export const ACTOR_KINDS: readonly ActorKind[] = ["human", "agent"];
 export const KEY_SCOPES: readonly KeyScope[] = ["read", "write"];
 
+/**
+ * One access grant on an API key: a target plus the rights on it. A key holds a
+ * LIST of grants chosen at creation time (several places, each with its own
+ * rights), instead of the legacy single solutionId+scope pair.
+ * Target: `projectId` = one project; `solutionId` = a whole solution (all its
+ * projects); neither = global. Never both on one grant.
+ */
+export interface KeyGrant {
+  solutionId?: string;
+  projectId?: string;
+  scope: KeyScope;
+}
+
+/** Grant as provided at key-creation time - scope may be omitted and falls
+ *  back to the key input's default `scope` (write when that is absent too). */
+export type KeyGrantInput = Omit<KeyGrant, "scope"> & { scope?: KeyScope };
+
 export interface Actor {
   id: string;
   kind: ActorKind;
@@ -194,10 +211,17 @@ export interface Actor {
 export interface ApiKey {
   id: string;
   actorId: string;
+  /** Legacy single-solution scope; derived from `grants` for new keys (the single
+   *  solution target when there is exactly one, else null). Kept for display
+   *  compatibility - `grants` is the source of truth. */
   solutionId: string | null;
   name: string;
   prefix: string;
+  /** Legacy aggregate scope: "write" when any grant can write, else "read". */
   scope: KeyScope;
+  /** The key's access grants (chosen at creation). Always present: legacy keys
+   *  without a stored list resolve to one grant derived from solutionId+scope. */
+  grants: KeyGrant[];
   expiresAt: string | null;
   createdByKeyId: string | null;
   lastUsedAt: string | null;
@@ -230,8 +254,15 @@ export interface CreateApiKeyInput {
   actorId?: string;
   /** When given instead of actorId, we create a new 'agent' actor with this name. */
   actorName?: string;
+  /**
+   * Access grants for the new key - several places, each with its own rights.
+   * When omitted, falls back to the legacy pair: `solutionId` (one solution or
+   * global when absent) + `scope` (default write) as a single grant.
+   */
+  grants?: KeyGrantInput[];
   solutionId?: string;
   name?: string;
+  /** Default scope for grants that omit their own (and the legacy fallback). */
   scope?: KeyScope;
   /** ISO expiry timestamp or a number of seconds from now (ttlSeconds). */
   expiresAt?: string;
