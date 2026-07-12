@@ -2523,8 +2523,64 @@ export class Repo {
       ),
     };
 
+    // Yesterday's closing snapshot for the KPI trend arrows, approximated from
+    // immutable timestamps (createdAt / completedAt). Deletions are not
+    // versioned (a row deleted today also disappears from yesterday's count)
+    // and a reopened task loses its old 'done' - fine for a trend indicator.
+    const startIso = this.startOfTodayIso(new Date());
+    const prevTotal = (coveredSql: string, globalSql: string) =>
+      covered
+        ? this.scalar(coveredSql, [...covered, startIso])
+        : this.scalar(globalSql, [startIso]);
+    const prevDoneTasks = prevTotal(
+      `SELECT COUNT(*) AS n FROM tasks t
+       JOIN milestones m ON t.milestoneId = m.id
+       JOIN projects p ON m.projectId = p.id
+       WHERE p.solutionId IN (${ph}) AND t.status='done'
+         AND t.completedAt IS NOT NULL AND t.completedAt < ?`,
+      `SELECT COUNT(*) AS n FROM tasks t WHERE t.status='done'
+         AND t.completedAt IS NOT NULL AND t.completedAt < ?`,
+    );
+    const prevOpenTasks = prevTotal(
+      `SELECT COUNT(*) AS n FROM tasks t
+       JOIN milestones m ON t.milestoneId = m.id
+       JOIN projects p ON m.projectId = p.id
+       WHERE p.solutionId IN (${ph}) AND t.status != 'closed' AND t.createdAt < ?`,
+      `SELECT COUNT(*) AS n FROM tasks t
+       WHERE t.status != 'closed' AND t.createdAt < ?`,
+    );
+    const totalsPrev = {
+      solutions: prevTotal(
+        `SELECT COUNT(*) AS n FROM solutions WHERE id IN (${ph}) AND createdAt < ?`,
+        `SELECT COUNT(*) AS n FROM solutions WHERE createdAt < ?`,
+      ),
+      projects: prevTotal(
+        `SELECT COUNT(*) AS n FROM projects
+         WHERE solutionId IN (${ph}) AND createdAt < ?`,
+        `SELECT COUNT(*) AS n FROM projects WHERE createdAt < ?`,
+      ),
+      milestones: prevTotal(
+        `SELECT COUNT(*) AS n FROM milestones m
+         JOIN projects p ON m.projectId = p.id
+         WHERE p.solutionId IN (${ph}) AND m.createdAt < ?`,
+        `SELECT COUNT(*) AS n FROM milestones WHERE createdAt < ?`,
+      ),
+      tasks: prevTotal(
+        `SELECT COUNT(*) AS n FROM tasks t
+         JOIN milestones m ON t.milestoneId = m.id
+         JOIN projects p ON m.projectId = p.id
+         WHERE p.solutionId IN (${ph}) AND t.createdAt < ?`,
+        `SELECT COUNT(*) AS n FROM tasks t WHERE t.createdAt < ?`,
+      ),
+      percent:
+        prevOpenTasks > 0
+          ? Math.round((prevDoneTasks / prevOpenTasks) * 100)
+          : 0,
+    };
+
     return {
       totals,
+      totalsPrev,
       statusCounts: countsWhere,
       progress: progressFromCounts(countsWhere),
       completed: this.completionCounts(covered),

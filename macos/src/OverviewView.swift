@@ -45,12 +45,23 @@ struct OverviewView: View {
 
     private func statsRow(_ d: DashboardPayload) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
-            StatTile(label: i18n.t("overview.solutions"), value: "\(d.totals.solutions)")
-            StatTile(label: i18n.t("overview.projects"), value: "\(d.totals.projects)")
-            StatTile(label: i18n.t("overview.milestones"), value: "\(d.totals.milestones)")
-            StatTile(label: i18n.t("overview.tasks"), value: "\(d.totals.tasks)")
-            StatTile(label: i18n.t("overview.completed"), value: "\(d.progress.percent)%", accent: true)
+            StatTile(label: i18n.t("overview.solutions"), value: "\(d.totals.solutions)",
+                     trend: trend(d.totals.solutions, d.totalsPrev?.solutions))
+            StatTile(label: i18n.t("overview.projects"), value: "\(d.totals.projects)",
+                     trend: trend(d.totals.projects, d.totalsPrev?.projects))
+            StatTile(label: i18n.t("overview.milestones"), value: "\(d.totals.milestones)",
+                     trend: trend(d.totals.milestones, d.totalsPrev?.milestones))
+            StatTile(label: i18n.t("overview.tasks"), value: "\(d.totals.tasks)",
+                     trend: trend(d.totals.tasks, d.totalsPrev?.tasks))
+            StatTile(label: i18n.t("overview.completed"), value: "\(d.progress.percent)%", accent: true,
+                     trend: trend(d.progress.percent, d.totalsPrev?.percent))
         }
+    }
+
+    /// Day-over-day direction for a stat tile (nil prev = older server, no arrow).
+    private func trend(_ now: Int, _ prev: Int?) -> StatTile.Trend? {
+        guard let prev else { return nil }
+        return now > prev ? .up : now < prev ? .down : .flat
     }
 
     private func open(_ ctx: TaskContext, _ taskId: String) {
@@ -66,14 +77,26 @@ struct OverviewView: View {
 
 // Web StatTile: rounded-lg border-edge bg-canvas-subtle px-4 py-3, mono 2xl value.
 struct StatTile: View {
+    enum Trend { case up, down, flat }
+
     var label: String
     var value: String
     var accent = false
+    /// Day-over-day direction vs yesterday's closing value (nil = no arrow).
+    var trend: Trend? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                .foregroundStyle(accent ? DS.accent : DS.fg)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(value)
+                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accent ? DS.accent : DS.fg)
+                if let trend {
+                    Text(trend == .up ? "↑" : trend == .down ? "↓" : "-")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(trend == .up ? DS.success : trend == .down ? DS.danger : DS.fgSubtle)
+                }
+            }
             Text(label).font(.system(size: 12)).foregroundStyle(DS.fgMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -200,17 +223,35 @@ struct OverviewTaskRow: View {
 }
 
 // Web SolutionBlock: header (icon + name + projShort + ProgressMeter) over a
-// recent-tasks list.
+// recent-tasks list. The chevron collapses the details; the choice persists in
+// UserDefaults so the next visit keeps it (web localStorage parity).
 struct SolutionBlockView: View {
     @Environment(\.i18n) private var i18n
     let solution: DashboardSolution
+
+    @State private var collapsed: Bool
+
+    init(solution: DashboardSolution) {
+        self.solution = solution
+        _collapsed = State(initialValue: UserDefaults.standard.bool(forKey: "fs.overview.collapsed.\(solution.id)"))
+    }
 
     var body: some View {
         Card(padding: nil) {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
+                    Button { toggle() } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DS.fgSubtle)
+                            .rotationEffect(.degrees(collapsed ? 0 : 90))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(i18n.t(collapsed ? "common.expand" : "common.collapse"))
                     Image(systemName: Glyph.symbol("solution")).font(.system(size: 16))
-                        .foregroundStyle(Color(hex: solution.base.base.color) ?? DS.accent)
+                        .foregroundStyle(solutionColor(solution.id))
                     Text(solution.base.base.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.fg).lineLimit(1)
                     Text(i18n.t("units.projShort", ["n": "\(solution.base.projectCount)"]))
                         .font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.fgSubtle)
@@ -220,9 +261,13 @@ struct SolutionBlockView: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 .background(DS.canvasSubtle)
-                .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)
+                .overlay(
+                    Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted)
+                        .opacity(collapsed ? 0 : 1),
+                    alignment: .bottom
+                )
 
-                if !solution.recentTasks.isEmpty {
+                if !collapsed && !solution.recentTasks.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Image(systemName: Glyph.symbol("clock")).font(.system(size: 12))
@@ -246,6 +291,11 @@ struct SolutionBlockView: View {
             }
         }
     }
+
+    private func toggle() {
+        collapsed.toggle()
+        UserDefaults.standard.set(collapsed, forKey: "fs.overview.collapsed.\(solution.id)")
+    }
 }
 
 // MARK: - Daily chart (multi-line, axes + markers + legend), mirroring DailyChart.tsx
@@ -253,6 +303,10 @@ struct SolutionBlockView: View {
 struct DailyChart: View {
     @Environment(\.i18n) private var i18n
     let data: DailyByStatus
+
+    // Day under the cursor: vertical guide + per-status summary tooltip
+    // (hovering anywhere in the plot snaps to the nearest day, like the web).
+    @State private var hoverIndex: Int?
 
     private var yMax: Int { max(1, data.counts.flatMap { $0 }.max() ?? 1) }
     private var hasData: Bool {
@@ -326,6 +380,29 @@ struct DailyChart: View {
                             .position(x: xFor(i), y: yFor(v))
                     }
                 }
+
+                // Hover: vertical guide on the nearest day + the day's summary.
+                if let hi = hoverIndex, hi < n {
+                    Path { p in
+                        p.move(to: CGPoint(x: xFor(hi), y: padT))
+                        p.addLine(to: CGPoint(x: xFor(hi), y: padT + plotH))
+                    }
+                    .stroke(DS.fgMuted, lineWidth: 2)
+
+                    tooltip(hi)
+                        .frame(width: 168)
+                        .offset(x: hi > (n - 1) / 2 ? xFor(hi) - 178 : xFor(hi) + 10, y: padT)
+                }
+            }
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let pt):
+                    let i = n <= 1 ? 0 : Int(round((pt.x - padL) / plotW * CGFloat(n - 1)))
+                    hoverIndex = min(max(0, i), n - 1)
+                case .ended:
+                    hoverIndex = nil
+                }
             }
         }
 
@@ -338,6 +415,29 @@ struct DailyChart: View {
                 }
             }
         }
+    }
+
+    /// Day summary card: the date + every status' transition count that day.
+    private func tooltip(_ i: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(data.days[i])
+                .font(.system(size: 10, design: .monospaced)).foregroundStyle(DS.fgSubtle)
+            ForEach(Array(data.statuses.enumerated()), id: \.offset) { si, status in
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2).fill(DS.statusBar(status)).frame(width: 8, height: 8)
+                    Text(i18n.t(DS.statusLabelKey(status))).font(.system(size: 11)).foregroundStyle(DS.fgMuted)
+                    Spacer(minLength: 12)
+                    Text("\((i < data.counts.count && si < data.counts[i].count) ? data.counts[i][si] : 0)")
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.fg)
+                }
+            }
+        }
+        .padding(10)
+        .background(DS.canvas)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DS.border, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .shadow(color: .black.opacity(0.10), radius: 3, y: 2)
+        .allowsHitTesting(false)
     }
 
     private func shortDay(_ day: String) -> String { day.count >= 10 ? String(day.dropFirst(5)) : day }

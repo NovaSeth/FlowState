@@ -16,9 +16,6 @@ import SwiftUI
 final class AppStore: ObservableObject {
     enum Section: String, CaseIterable { case overview, explore, users, settings }
     enum TaskViewMode: String, CaseIterable { case list, kanban }
-    // Web ProjectView: two ways to look at a single project - the milestone-cards
-    // dashboard (default) or the Miller "columns" cascade.
-    enum ProjectViewMode: String, CaseIterable { case dashboard, columns }
 
     // Navigation (top-level section, mirrors the web NavRail).
     @Published var section: Section = .overview
@@ -29,10 +26,13 @@ final class AppStore: ObservableObject {
     @Published private(set) var projects: [ProjectRollup] = []
     @Published private(set) var milestones: [MilestoneRollup] = []
     @Published private(set) var tasks: [TaskListItem] = []
-    /// Every task in the selected project (across milestones) - the project
-    /// dashboard view's data. Refreshed by the same SSE-driven refetch.
-    @Published private(set) var projectTasks: [TaskListItem] = []
     @Published private(set) var taskDetail: TaskDetail?
+
+    // Project dashboard panel (the Explorer kebab's "Open dashboard"): the
+    // project it shows + its own milestone slice, independent of the drill
+    // selection - the native mirror of the web ProjectPanel drawer.
+    @Published private(set) var dashboardProjectId: String?
+    @Published private(set) var dashboardMilestones: [MilestoneRollup] = []
 
     // Selection (the cascading drill state).
     @Published private(set) var selectedSolutionId: String?
@@ -43,11 +43,6 @@ final class AppStore: ObservableObject {
     // View preferences (persist across navigation, like the web).
     @Published var taskViewMode: TaskViewMode = .list
     @Published var showClosed = false
-    // Dashboard | Columns choice for the project region, persisted across
-    // relaunches (same UserDefaults pattern as fs.miller.collapsed).
-    @Published var projectViewMode: ProjectViewMode {
-        didSet { UserDefaults.standard.set(projectViewMode.rawValue, forKey: "fs.projectView") }
-    }
 
     // Users (actors / keys / activity).
     @Published private(set) var actors: [Actor] = []
@@ -82,9 +77,6 @@ final class AppStore: ObservableObject {
         self.api = api
         self.events = events
         self.i18n = Localization.load(locale: locale, bundle: .main)
-        // Restore the persisted project view mode (default = dashboard, like the web).
-        self.projectViewMode = UserDefaults.standard.string(forKey: "fs.projectView")
-            .flatMap(ProjectViewMode.init(rawValue:)) ?? .dashboard
         // Launch hook (deep-link / screenshots): `--section <name>` opens a section.
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "--section"), i + 1 < args.count, let sec = Section(rawValue: args[i + 1]) {
@@ -168,12 +160,10 @@ final class AppStore: ObservableObject {
     func refetchVisible() async {
         await reloadOverview()
         if let id = selectedSolutionId { await loadProjects(id) }
-        if let id = selectedProjectId {
-            await loadMilestones(id)
-            await loadProjectTasks(id)
-        }
+        if let id = selectedProjectId { await loadMilestones(id) }
         if let id = selectedMilestoneId { await loadTasks(id) }
         if let id = selectedTaskId { await loadTaskDetail(id) }
+        if let id = dashboardProjectId { await loadDashboardMilestones(id) }
         if section == .users {
             await loadUsers()
             if let k = selectedKeyId { await selectKey(k) }
@@ -193,8 +183,8 @@ final class AppStore: ObservableObject {
         do { tasks = try await api.tasks(milestoneId: milestoneId) } catch { capture(error) }
     }
     @MainActor
-    private func loadProjectTasks(_ projectId: String) async {
-        do { projectTasks = try await api.tasks(projectId: projectId) } catch { capture(error) }
+    private func loadDashboardMilestones(_ projectId: String) async {
+        do { dashboardMilestones = try await api.milestones(projectId: projectId) } catch { capture(error) }
     }
     @MainActor
     private func loadTaskDetail(_ id: String) async {
@@ -219,7 +209,7 @@ final class AppStore: ObservableObject {
     func selectSolution(_ id: String) async {
         selectedSolutionId = id
         selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
-        projects = []; milestones = []; tasks = []; projectTasks = []; taskDetail = nil
+        projects = []; milestones = []; tasks = []; taskDetail = nil
         await loadProjects(id)
     }
 
@@ -227,9 +217,8 @@ final class AppStore: ObservableObject {
     func selectProject(_ id: String) async {
         selectedProjectId = id
         selectedMilestoneId = nil; selectedTaskId = nil
-        milestones = []; tasks = []; projectTasks = []; taskDetail = nil
+        milestones = []; tasks = []; taskDetail = nil
         await loadMilestones(id)
-        await loadProjectTasks(id)
     }
 
     @MainActor
@@ -244,11 +233,29 @@ final class AppStore: ObservableObject {
     func selectTask(_ id: String?) async {
         selectedTaskId = id
         taskDetail = nil
+        // The task inspector and the project dashboard share the trailing edge.
+        if id != nil { closeProjectDashboard() }
         if let id { await loadTaskDetail(id) }
     }
 
     @MainActor
     func closeTask() { selectedTaskId = nil; taskDetail = nil }
+
+    // MARK: - Project dashboard panel
+
+    @MainActor
+    func openProjectDashboard(_ projectId: String) async {
+        selectedTaskId = nil; taskDetail = nil
+        dashboardProjectId = projectId
+        dashboardMilestones = []
+        await loadDashboardMilestones(projectId)
+    }
+
+    @MainActor
+    func closeProjectDashboard() {
+        dashboardProjectId = nil
+        dashboardMilestones = []
+    }
 
     // MARK: - Gamification (scoreboard pop + "YOU WIN" banner)
 
@@ -441,7 +448,7 @@ final class AppStore: ObservableObject {
         try await api.deleteSolution(id: id)
         if selectedSolutionId == id {
             selectedSolutionId = nil; selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
-            projects = []; milestones = []; tasks = []; projectTasks = []; taskDetail = nil
+            projects = []; milestones = []; tasks = []; taskDetail = nil
         }
         await refetchVisible()
     }
@@ -451,8 +458,9 @@ final class AppStore: ObservableObject {
         try await api.deleteProject(id: id)
         if selectedProjectId == id {
             selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
-            milestones = []; tasks = []; projectTasks = []; taskDetail = nil
+            milestones = []; tasks = []; taskDetail = nil
         }
+        if dashboardProjectId == id { closeProjectDashboard() }
         await refetchVisible()
     }
 

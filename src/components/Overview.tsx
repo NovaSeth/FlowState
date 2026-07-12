@@ -31,11 +31,33 @@ export function Overview({ initial }: { initial: DashboardPayload }) {
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 sm:px-6">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatTile label={t("overview.solutions")} value={d.totals.solutions} />
-        <StatTile label={t("overview.projects")} value={d.totals.projects} />
-        <StatTile label={t("overview.milestones")} value={d.totals.milestones} />
-        <StatTile label={t("overview.tasks")} value={d.totals.tasks} />
-        <StatTile label={t("overview.completed")} value={d.progress.percent} suffix="%" accent />
+        <StatTile
+          label={t("overview.solutions")}
+          value={d.totals.solutions}
+          prev={d.totalsPrev?.solutions}
+        />
+        <StatTile
+          label={t("overview.projects")}
+          value={d.totals.projects}
+          prev={d.totalsPrev?.projects}
+        />
+        <StatTile
+          label={t("overview.milestones")}
+          value={d.totals.milestones}
+          prev={d.totalsPrev?.milestones}
+        />
+        <StatTile
+          label={t("overview.tasks")}
+          value={d.totals.tasks}
+          prev={d.totalsPrev?.tasks}
+        />
+        <StatTile
+          label={t("overview.completed")}
+          value={d.progress.percent}
+          suffix="%"
+          accent
+          prev={d.totalsPrev?.percent}
+        />
       </div>
 
       <section className="space-y-3">

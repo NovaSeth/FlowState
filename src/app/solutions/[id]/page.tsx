@@ -6,6 +6,7 @@ import { DeleteSolutionButton } from "@/components/SolutionActions";
 import { LiveRefresher } from "@/components/LiveRefresher";
 import { Icon } from "@/components/icons";
 import { serverT } from "@/i18n/server";
+import { solutionColor } from "@/lib/solution-color";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ export default async function SolutionPage({
           <div className="flex items-center gap-2.5">
             <span
               className="inline-block h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: solution.color || "var(--accent)" }}
+              style={{ backgroundColor: solutionColor(solution.id) }}
             />
             <h1 className="text-xl font-semibold tracking-tight text-fg">
               {solution.name}

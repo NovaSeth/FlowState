@@ -45,7 +45,6 @@ struct NavRail: View {
         (.overview, "home", "nav.overview"),
         (.explore, "columns", "nav.explorer"),
         (.users, "users", "nav.users"),
-        (.settings, "settings", "nav.settings"),
     ]
 
     var body: some View {
@@ -54,6 +53,8 @@ struct NavRail: View {
                 navButton(section, icon, i18n.t(key))
             }
             Spacer()
+            // Settings pinned at the bottom, right above the version (web parity).
+            navButton(.settings, "settings", i18n.t("nav.settings"))
             Text("v\(uiVersion)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.7))

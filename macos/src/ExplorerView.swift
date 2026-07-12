@@ -18,7 +18,17 @@ struct ExplorerView: View {
             } else {
                 ColumnPlaceholder(text: placeholderText)
             }
-            if store.selectedTaskId != nil {
+            // The trailing inspector edge: the project dashboard panel (kebab
+            // "Open dashboard") or the task detail - mutually exclusive, the
+            // store closes one when the other opens (web drawer parity).
+            if let dashProject = store.projects.first(where: { $0.id == store.dashboardProjectId }) {
+                ProjectPanel(project: dashProject)
+                    // Remount per project so transient panel state never carries over.
+                    .id(dashProject.id)
+                    // A third wider than the task inspector - it is a dashboard.
+                    .frame(width: 500)
+                    .overlay(Rectangle().frame(width: 1).foregroundStyle(DS.border), alignment: .leading)
+            } else if store.selectedTaskId != nil {
                 TaskDetailPanel()
                     // Remount per task so the panel's editing @State (comment draft,
                     // pending-block reason) starts fresh and never carries over onto
@@ -32,41 +42,15 @@ struct ExplorerView: View {
         .background(DS.canvas)
     }
 
-    // MARK: - Project region (Dashboard | Columns, web ProjectView parity)
+    // MARK: - Project region (Miller cascade: Milestones column -> task pane)
 
-    // Everything right of the Projects column once a project is selected: a slim
-    // bar with the segmented Dashboard | Columns toggle (web ViewToggle), then
-    // either the project dashboard or the classic Miller cascade (Milestones
-    // column -> task pane).
     private var projectRegion: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                ProjectViewToggle(mode: $store.projectViewMode)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 44)
-            .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)
-
-            if store.projectViewMode == .dashboard {
-                if let project = store.projects.first(where: { $0.id == store.selectedProjectId }) {
-                    ProjectDashboardView(project: project)
-                        // Remount per project so the board's milestone filter
-                        // resets (the web re-mounts ProjectView on navigation).
-                        .id(project.id)
-                } else {
-                    // Rollup not in the loaded list yet (mid-refetch).
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+        HStack(alignment: .top, spacing: 0) {
+            milestonesColumn
+            if store.selectedMilestoneId != nil {
+                TaskPaneView().frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                HStack(alignment: .top, spacing: 0) {
-                    milestonesColumn
-                    if store.selectedMilestoneId != nil {
-                        TaskPaneView().frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        ColumnPlaceholder(text: i18n.t("explorer.pickMilestone"))
-                    }
-                }
+                ColumnPlaceholder(text: i18n.t("explorer.pickMilestone"))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -116,14 +100,13 @@ struct ExplorerView: View {
             editTitle: i18n.t("entity.editSolution"),
             name: sol.base.name,
             description: sol.base.description,
-            color: sol.base.color.isEmpty ? "#0969da" : sol.base.color,
             status: sol.base.status.rawValue,
             statusOptions: SolutionStatus.allCases.map {
                 EntityOption(value: $0.rawValue, labelKey: DS.solutionStatusLabelKey($0))
             },
             outcome: nil, outcomeOptions: nil,
-            saveDetails: { name, description, color in
-                try await store.updateSolution(sol.id, name: name, description: description, color: color)
+            saveDetails: { name, description in
+                try await store.updateSolution(sol.id, name: name, description: description)
             },
             setStatus: { raw in
                 try await store.updateSolution(sol.id, status: SolutionStatus(rawValue: raw))
@@ -171,20 +154,21 @@ struct ExplorerView: View {
             editTitle: i18n.t("entity.editProject"),
             name: proj.base.name,
             description: proj.base.description,
-            color: nil,
             status: proj.base.status.rawValue,
             statusOptions: ProjectStatus.allCases.map {
                 EntityOption(value: $0.rawValue, labelKey: DS.projectStatusLabelKey($0))
             },
             outcome: nil, outcomeOptions: nil,
-            saveDetails: { name, description, _ in
+            saveDetails: { name, description in
                 try await store.updateProject(proj.id, name: name, description: description)
             },
             setStatus: { raw in
                 try await store.updateProject(proj.id, status: ProjectStatus(rawValue: raw))
             },
             setOutcome: nil,
-            delete: { try await store.deleteProject(proj.id) }
+            delete: { try await store.deleteProject(proj.id) },
+            openLabel: i18n.t("entity.openDashboard"),
+            open: { _Concurrency.Task { await store.openProjectDashboard(proj.id) } }
         )
     }
 
@@ -226,7 +210,6 @@ struct ExplorerView: View {
             editTitle: i18n.t("entity.editMilestone"),
             name: ms.base.title,
             description: ms.base.description,
-            color: nil,
             status: ms.base.status.rawValue,
             statusOptions: MilestoneStatus.allCases.map {
                 EntityOption(value: $0.rawValue, labelKey: DS.projectStatusLabelKey($0))
@@ -235,7 +218,7 @@ struct ExplorerView: View {
             outcomeOptions: MilestoneOutcome.allCases.map {
                 EntityOption(value: $0.rawValue, labelKey: DS.outcomeLabelKey($0))
             },
-            saveDetails: { name, description, _ in
+            saveDetails: { name, description in
                 // The edit form's "name" is the milestone's title on the API.
                 try await store.updateMilestone(ms.id, title: name, description: description)
             },

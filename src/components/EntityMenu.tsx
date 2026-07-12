@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { Icon } from "./icons";
 import { btnGhost, btnPrimary, inputCls } from "./ui";
 import { useT } from "@/i18n/provider";
@@ -16,7 +15,6 @@ import { useT } from "@/i18n/provider";
 export interface EntityPatch {
   name?: string;
   description?: string;
-  color?: string;
   status?: string;
   outcome?: string | null;
 }
@@ -28,11 +26,10 @@ interface Option {
 
 export function EntityMenu({
   editTitle,
-  openHref,
+  onOpen,
   openLabel,
   name,
   description,
-  color,
   status,
   statusOptions,
   outcome,
@@ -44,13 +41,11 @@ export function EntityMenu({
 }: {
   /** Localized dialog heading, e.g. "Edit project". */
   editTitle: string;
-  /** Optional navigation item pinned first, e.g. the project's dashboard page. */
-  openHref?: string;
+  /** Optional action pinned first, e.g. opening the project dashboard panel. */
+  onOpen?: () => void;
   openLabel?: string;
   name: string;
   description: string;
-  /** Present only for solutions - shows the color field. */
-  color?: string;
   status: string;
   statusOptions: Option[];
   /** Present only for milestones - shows the outcome section (null = none). */
@@ -153,14 +148,20 @@ export function EntityMenu({
               style={{ top: pos.top, right: pos.right }}
               role="menu"
             >
-              {openHref && openLabel && (
+              {onOpen && openLabel && (
                 <>
-                  <Link href={openHref} onClick={close} className={itemCls}>
+                  <button
+                    onClick={() => {
+                      close();
+                      onOpen();
+                    }}
+                    className={itemCls}
+                  >
                     <span className="w-3.5 shrink-0">
                       <Icon name="overview" size={13} />
                     </span>
                     {openLabel}
-                  </Link>
+                  </button>
                   <div className="my-1 border-t border-edge-muted" />
                 </>
               )}
@@ -237,7 +238,6 @@ export function EntityMenu({
           title={editTitle}
           name={name}
           description={description}
-          color={color}
           onSave={onSave}
           onChanged={onChanged}
           onClose={() => setEditing(false)}
@@ -247,12 +247,11 @@ export function EntityMenu({
   );
 }
 
-/** Modal form for the fields that need typing: name, description, color. */
+/** Modal form for the fields that need typing: name, description. */
 function EditEntityDialog({
   title,
   name,
   description,
-  color,
   onSave,
   onChanged,
   onClose,
@@ -260,7 +259,6 @@ function EditEntityDialog({
   title: string;
   name: string;
   description: string;
-  color?: string;
   onSave: (patch: EntityPatch) => Promise<unknown>;
   onChanged: () => void;
   onClose: () => void;
@@ -268,7 +266,6 @@ function EditEntityDialog({
   const t = useT();
   const [draftName, setDraftName] = useState(name);
   const [draftDesc, setDraftDesc] = useState(description);
-  const [draftColor, setDraftColor] = useState(color ?? "#0969da");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -290,7 +287,6 @@ function EditEntityDialog({
         name: draftName.trim(),
         description: draftDesc,
       };
-      if (color !== undefined) patch.color = draftColor;
       await onSave(patch);
       onChanged();
       onClose();
@@ -336,20 +332,6 @@ function EditEntityDialog({
             className={`${inputCls} resize-y`}
           />
         </label>
-        {color !== undefined && (
-          <label className="flex items-center gap-2">
-            <span className={labelCls}>{t("entity.color")}</span>
-            <input
-              type="color"
-              value={draftColor}
-              onChange={(e) => setDraftColor(e.target.value)}
-              className="h-7 w-10 cursor-pointer rounded border border-edge bg-canvas-subtle"
-            />
-            <code className="font-mono text-xs text-fg-muted">
-              {draftColor}
-            </code>
-          </label>
-        )}
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={btnGhost}>

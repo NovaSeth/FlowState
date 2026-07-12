@@ -119,11 +119,12 @@ function subscribeCollapse(fn: () => void) {
 }
 
 /**
- * Reads/writes a single collapsible column's persisted state under `collapseId`.
+ * Reads/writes a single collapsible element's persisted state under `collapseId`.
  * SSR-safe via useSyncExternalStore (server snapshot = expanded). A no-op when
- * `collapseId` is undefined.
+ * `collapseId` is undefined. Shared beyond the Miller columns (e.g. the Overview
+ * solution blocks) - namespace the id (`overview.sol.<id>`) to avoid clashes.
  */
-function usePersistentCollapse(collapseId: string | undefined) {
+export function usePersistentCollapse(collapseId: string | undefined) {
   const getSnapshot = useCallback(
     () => (collapseId ? !!readCollapsedMap()[collapseId] : false),
     [collapseId],

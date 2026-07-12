@@ -356,6 +356,16 @@ export interface DashboardPayload {
     milestones: number;
     tasks: number;
   };
+  /** The same headline figures as of the start of today (plus the done-%),
+   *  approximated from createdAt/completedAt (deletions are not versioned).
+   *  Drives the day-over-day trend arrows on the stat tiles. */
+  totalsPrev: {
+    solutions: number;
+    projects: number;
+    milestones: number;
+    tasks: number;
+    percent: number;
+  };
   statusCounts: StatusCounts;
   progress: Progress;
   /** Cumulative completion counters (for gamification - detecting new completions

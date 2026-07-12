@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   MilestoneRollup,
@@ -11,7 +11,6 @@ import {
 } from "@/lib/types";
 import {
   MILESTONE_OUTCOME_META,
-  MILESTONE_STATUS_META,
   PROJECT_STATUS_META,
   STATUS_META,
   STATUS_ORDER,
@@ -19,26 +18,22 @@ import {
 import { api } from "@/lib/api";
 import {
   Card,
-  CountPill,
   Dot,
   Eyebrow,
   MetaPill,
   PriorityBadge,
   ProgressMeter,
-  StatusPill,
   TaskCard,
 } from "./ui";
 import { Icon } from "./icons";
-import { NewMilestoneForm, NewTaskForm } from "./forms";
+import { NewTaskForm } from "./forms";
 import { DeleteButton } from "./DeleteButton";
 import { TaskPanel } from "./TaskPanel";
-import { ColHint, Column, Placeholder, withArchivedDivider } from "./miller";
 import { useT } from "@/i18n/provider";
 
-// Two ways to look at a single project: the "dashboard" (milestone cards + a
-// status board) and "columns" - the Explorer's Miller cascade scoped to this
-// project (Milestones -> Tasks -> detail), reusing the same column primitives.
-type ProjectViewMode = "dashboard" | "columns";
+// The single-project dashboard page: milestone cards + a status board. The
+// Miller-cascade way of browsing a project lives in the Explorer; here there is
+// deliberately no view toggle (it was removed together with the "columns" mode).
 
 export function ProjectView({
   project,
@@ -58,9 +53,6 @@ export function ProjectView({
     initialTaskId ?? null,
   );
   const [filter, setFilter] = useState<string>("all");
-  const [view, setView] = useState<ProjectViewMode>("dashboard");
-  // Columns view: the selected milestone whose tasks fill the tasks pane.
-  const [colMsId, setColMsId] = useState<string | null>(null);
 
   const selectedTask = tasks.find((t) => t.id === selectedId) ?? null;
   const selectedMilestoneTitle = milestones.find(
@@ -71,23 +63,7 @@ export function ProjectView({
     filter === "all" ? tasks : tasks.filter((t) => t.milestoneId === filter);
   const milestoneOptions = milestones.map((m) => ({ id: m.id, title: m.title }));
 
-  // Columns view falls back to the first (non-archived) milestone so the tasks
-  // pane is populated without an extra click.
-  const activeMsId =
-    colMsId ??
-    milestones.find((m) => m.status !== "archived")?.id ??
-    milestones[0]?.id ??
-    null;
-  const activeMsTasks = useMemo(
-    () =>
-      [...tasks.filter((t) => t.milestoneId === activeMsId)].sort(
-        (a, b) =>
-          STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
-      ),
-    [tasks, activeMsId],
-  );
-
-  // breadcrumb + header, shared by both layouts (carries the view toggle).
+  // breadcrumb + header
   const header = (
     <div>
       <nav className="flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle">
@@ -117,9 +93,6 @@ export function ProjectView({
           {project.progress.done}/{project.progress.total}{" "}
           {t("project.tasks").toLowerCase()} - {project.progress.percent}%
         </span>
-        <span className="ml-auto">
-          <ViewToggle view={view} onChange={setView} />
-        </span>
       </div>
       {project.description && (
         <p className="mt-1 max-w-2xl text-sm text-fg-muted">
@@ -137,85 +110,7 @@ export function ProjectView({
     />
   );
 
-  // --- columns view: Miller cascade (Milestones -> Tasks) scoped to the project ---
-  if (view === "columns") {
-    return (
-      <>
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="shrink-0 border-b border-edge px-6 py-4">{header}</div>
-          <div className="flex min-h-0 flex-1 overflow-x-auto">
-            <Column
-              title={t("explorer.milestones")}
-              count={milestones.length}
-              collapseId="proj.milestones"
-            >
-              <div className="flex h-full min-h-0 flex-col">
-                <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-                  {milestones.length === 0 ? (
-                    <ColHint text={t("explorer.noMilestones")} />
-                  ) : (
-                    withArchivedDivider(
-                      milestones,
-                      (m) => m.status === "archived",
-                      (m) => (
-                        <ColumnMilestoneRow
-                          key={m.id}
-                          m={m}
-                          active={m.id === activeMsId}
-                          onSelect={() => setColMsId(m.id)}
-                        />
-                      ),
-                    )
-                  )}
-                </div>
-                {/* No onDone -> useCreate router.refresh() reloads the server
-                    data; the client selection state survives the refresh. */}
-                <div className="shrink-0 border-t border-edge bg-canvas p-2">
-                  <NewMilestoneForm projectId={project.id} />
-                </div>
-              </div>
-            </Column>
-
-            {activeMsId ? (
-              <div className="flex min-w-[360px] flex-1 flex-col border-r border-edge bg-canvas">
-                <div className="flex shrink-0 items-center gap-2 border-b border-edge-muted px-3 py-2.5">
-                  <Eyebrow>{t("explorer.tasks")}</Eyebrow>
-                  <CountPill>{activeMsTasks.length}</CountPill>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                  {activeMsTasks.length === 0 ? (
-                    <ColHint text={t("explorer.noTasks")} />
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      {activeMsTasks.map((task) => (
-                        <ColumnTaskRow
-                          key={task.id}
-                          task={task}
-                          active={selectedId === task.id}
-                          onSelect={() => setSelectedId(task.id)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="shrink-0 border-t border-edge bg-canvas p-2">
-                  <NewTaskForm
-                    milestones={milestoneOptions}
-                    defaultMilestoneId={activeMsId}
-                  />
-                </div>
-              </div>
-            ) : (
-              <Placeholder hint={t("explorer.pickMilestone")} />
-            )}
-          </div>
-        </div>
-        {taskPanel}
-      </>
-    );
-  }
-
-  // --- dashboard view (default): milestone cards + status board ---
+  // milestone cards + status board
   return (
     <>
       <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
@@ -310,95 +205,6 @@ export function ProjectView({
       </div>
       {taskPanel}
     </>
-  );
-}
-
-/** Segmented Dashboard | Columns toggle (lives in the project header). */
-function ViewToggle({
-  view,
-  onChange,
-}: {
-  view: ProjectViewMode;
-  onChange: (v: ProjectViewMode) => void;
-}) {
-  const t = useT();
-  const btn = (v: ProjectViewMode, label: string) => (
-    <button
-      key={v}
-      onClick={() => onChange(v)}
-      aria-pressed={view === v}
-      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-        view === v
-          ? "bg-canvas text-fg shadow-resting"
-          : "text-fg-muted hover:text-fg"
-      }`}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div className="inline-flex items-center gap-0.5 rounded-lg border border-edge bg-canvas-subtle p-0.5">
-      {btn("dashboard", t("project.viewDashboard"))}
-      {btn("columns", t("project.viewColumns"))}
-    </div>
-  );
-}
-
-/** Milestone row in the columns view (selectable; archived rows are dimmed). */
-function ColumnMilestoneRow({
-  m,
-  active,
-  onSelect,
-}: {
-  m: MilestoneRollup;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`flex w-full flex-col gap-1.5 px-3 py-2.5 text-left transition ${
-        active ? "bg-accent-muted" : "hover:bg-canvas-subtle"
-      } ${m.status === "archived" ? "opacity-50 hover:opacity-100" : ""}`}
-    >
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm text-fg">
-          {m.title}
-        </span>
-        <MetaPill meta={MILESTONE_STATUS_META[m.status]} size="sm" />
-      </div>
-      <ProgressMeter progress={m.progress} counts={m.statusCounts} />
-    </button>
-  );
-}
-
-/** Task row in the columns view tasks pane (mirrors the Explorer list row). */
-function ColumnTaskRow({
-  task,
-  active,
-  onSelect,
-}: {
-  task: Task;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`flex flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition-all ${
-        active
-          ? "border-accent bg-canvas shadow-hover"
-          : "border-edge bg-canvas hover:border-accent hover:shadow-hover"
-      }`}
-    >
-      <div className="flex items-center gap-2.5">
-        <StatusPill status={task.status} />
-        <span className="min-w-0 flex-1 truncate text-sm text-fg">
-          {task.title}
-        </span>
-        <PriorityBadge priority={task.priority} />
-      </div>
-    </button>
   );
 }
 

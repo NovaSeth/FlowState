@@ -21,20 +21,21 @@ struct EntityMenuModel {
     let editTitle: String
     let name: String
     let description: String
-    /// Present only for solutions - shows the color field in the edit sheet.
-    let color: String?
     /// Current status raw value + the entity's full status option list.
     let status: String
     let statusOptions: [EntityOption]
     /// Present only for milestones - shows the outcome section (nil = none).
     let outcome: String?
     let outcomeOptions: [EntityOption]?
-    /// PATCH name/description(/color). Milestones map name -> title inside.
-    let saveDetails: (_ name: String, _ description: String, _ color: String?) async throws -> Void
+    /// PATCH name/description. Milestones map name -> title inside.
+    let saveDetails: (_ name: String, _ description: String) async throws -> Void
     let setStatus: (_ status: String) async throws -> Void
     /// Milestones only; nil value clears the outcome (JSON null).
     let setOutcome: ((_ outcome: String?) async throws -> Void)?
     let delete: () async throws -> Void
+    /// Optional navigation item pinned first (e.g. the project dashboard panel).
+    var openLabel: String? = nil
+    var open: (() -> Void)? = nil
 }
 
 // MARK: - Row chrome (kebab overlay + context menu + edit sheet + delete confirm)
@@ -115,6 +116,10 @@ private struct EntityMenuChrome: ViewModifier {
     // the native check mark on the current status/outcome, mirroring the web radio.
     @ViewBuilder
     private func items(_ model: EntityMenuModel) -> some View {
+        if let openLabel = model.openLabel, let open = model.open {
+            Button(openLabel) { open() }
+            Divider()
+        }
         Button(i18n.t("entity.edit")) { showEdit = true }
         Section(i18n.t("entity.status")) {
             ForEach(model.statusOptions) { option in
@@ -158,7 +163,7 @@ private struct EntityMenuChrome: ViewModifier {
     }
 }
 
-// MARK: - Edit sheet (web EditEntityDialog: name, description, color for solutions)
+// MARK: - Edit sheet (web EditEntityDialog: name, description)
 
 struct EntityEditSheet: View {
     @Environment(\.i18n) private var i18n
@@ -167,7 +172,6 @@ struct EntityEditSheet: View {
 
     @State private var draftName: String
     @State private var draftDescription: String
-    @State private var draftColor: String
     @State private var busy = false
     @State private var error: String?
 
@@ -175,7 +179,6 @@ struct EntityEditSheet: View {
         self.model = model
         _draftName = State(initialValue: model.name)
         _draftDescription = State(initialValue: model.description)
-        _draftColor = State(initialValue: model.color ?? "#0969da")
     }
 
     private var trimmedName: String { draftName.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -213,22 +216,6 @@ struct EntityEditSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
-            if model.color != nil {
-                field(i18n.t("entity.color")) {
-                    HStack(spacing: 8) {
-                        // Live swatch preview of the hex value (web <input type=color>).
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color(hex: draftColor) ?? .clear)
-                            .frame(width: 28, height: 20)
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(DS.border, lineWidth: 1))
-                        TextField("#0969da", text: $draftColor)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .frame(width: 110)
-                    }
-                }
-            }
-
             if let error {
                 Text(error).font(.system(size: 12)).foregroundStyle(DS.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -251,16 +238,15 @@ struct EntityEditSheet: View {
         .background(DS.canvas)
     }
 
-    /// PATCH only the typed fields (name/description, + color for solutions); on
-    /// success close, on failure keep the sheet open with the error inline.
+    /// PATCH only the typed fields (name/description); on success close, on
+    /// failure keep the sheet open with the error inline.
     private func save() {
         guard !busy, !trimmedName.isEmpty else { return }
         busy = true
         error = nil
         _Concurrency.Task {
             do {
-                try await model.saveDetails(
-                    trimmedName, draftDescription, model.color != nil ? draftColor : nil)
+                try await model.saveDetails(trimmedName, draftDescription)
                 dismiss()
             } catch {
                 self.error = String(describing: error)

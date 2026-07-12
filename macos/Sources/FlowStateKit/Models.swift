@@ -410,6 +410,15 @@ public struct DashboardPayload: Decodable, Sendable {
         public let milestones: Int
         public let tasks: Int
     }
+    /// Yesterday's closing figures (plus the done-%) - drives the day-over-day
+    /// trend arrows on the stat tiles. Optional: older servers omit it.
+    public struct TotalsPrev: Codable, Sendable {
+        public let solutions: Int
+        public let projects: Int
+        public let milestones: Int
+        public let tasks: Int
+        public let percent: Int
+    }
     public struct Completed: Codable, Sendable {
         public let tasksDone: Int
         public let milestonesDone: Int
@@ -428,6 +437,7 @@ public struct DashboardPayload: Decodable, Sendable {
     }
 
     public let totals: Totals
+    public let totalsPrev: TotalsPrev?
     public let statusCounts: StatusCounts
     public let progress: Progress
     public let completed: Completed

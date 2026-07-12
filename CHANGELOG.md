@@ -21,10 +21,38 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Added
 
-- The Explorer's project kebab menu gained an **Open dashboard** item linking to
-  the single-project page (`/projects/[id]`) - previously that page was only
-  reachable from task links on the Overview. The native macOS app needs no
-  equivalent: its Explorer already shows the project dashboard inline.
+- The Explorer's project kebab menu gained an **Open dashboard** item that opens
+  the project dashboard as a right-edge inspector panel (like the task detail
+  panel, a third wider): title + status + progress, a KPI row of mini stat
+  tiles (milestones, tasks, done-%, in progress, blocked, done), description,
+  and stacked milestone cards. On the web the panel links to the full
+  `/projects/[id]` page; the native macOS app shows the same panel on the
+  Explorer's trailing edge.
+- Overview solution blocks can be collapsed to a single header row; the choice
+  persists (web localStorage / macOS UserDefaults), so the next visit keeps it.
+- The daily status chart shows a hover tooltip: a vertical guide snaps to the
+  nearest day and a card lists every status' transition count for that day
+  (web + macOS).
+- The KPI stat tiles show a day-over-day trend arrow (up / down / dash) next to
+  each value, comparing against yesterday's closing figures. The dashboard API
+  payload gained `totalsPrev` (counts + done-% as of the start of today,
+  approximated from `createdAt` / `completedAt`).
+
+### Removed
+
+- The **Dashboard | Columns** view toggle (web `/projects/[id]` and the macOS
+  Explorer's project region). The Explorer is the one Miller-cascade way to
+  browse a project; the dashboard is reachable from the project kebab as an
+  inspector panel, and the web project page is dashboard-only.
+- The solution color picker in the edit dialog (web + macOS). Solution icon
+  colors are now derived deterministically from the solution id (same hash +
+  palette on both platforms), so every solution gets a distinct hue with no
+  manual upkeep.
+
+### Changed
+
+- The Settings icon moved to the bottom of the navigation rail, right above the
+  UI version marker (web + macOS).
 - The single-project page (`/projects/[id]`) gained a **Dashboard | Columns**
   view toggle. "Columns" is the Explorer's Miller cascade scoped to the project
   (Milestones → Tasks → detail), reusing the shared column primitives and the

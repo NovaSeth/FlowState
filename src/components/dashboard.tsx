@@ -18,25 +18,54 @@ import {
 import { Icon } from "./icons";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { Pulse } from "./Pulse";
+import { usePersistentCollapse } from "./miller";
+import { solutionColor } from "@/lib/solution-color";
 
 export function StatTile({
   label,
   value,
   suffix = "",
   accent = false,
+  prev,
 }: {
   label: string;
   value: number;
   suffix?: string;
   accent?: boolean;
+  /** Yesterday's closing value: renders the day-over-day trend arrow. */
+  prev?: number;
 }) {
+  const trend =
+    prev === undefined
+      ? null
+      : value > prev
+        ? "up"
+        : value < prev
+          ? "down"
+          : "flat";
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border border-edge bg-canvas-subtle px-4 py-3">
-      <AnimatedNumber
-        value={value}
-        suffix={suffix}
-        className={`font-mono text-2xl font-semibold tabular-nums ${accent ? "text-accent" : "text-fg"}`}
-      />
+      <span className="flex items-baseline gap-1.5">
+        <AnimatedNumber
+          value={value}
+          suffix={suffix}
+          className={`font-mono text-2xl font-semibold tabular-nums ${accent ? "text-accent" : "text-fg"}`}
+        />
+        {trend && (
+          <span
+            title={`${prev}${suffix} -> ${value}${suffix}`}
+            className={`font-mono text-sm font-semibold ${
+              trend === "up"
+                ? "text-success"
+                : trend === "down"
+                  ? "text-danger"
+                  : "text-fg-subtle"
+            }`}
+          >
+            {trend === "up" ? "↑" : trend === "down" ? "↓" : "-"}
+          </span>
+        )}
+      </span>
       <span className="text-xs text-fg-muted">{label}</span>
     </div>
   );
@@ -144,13 +173,34 @@ export function RecentFeed({ tasks }: { tasks: TaskWithContext[] }) {
 export function SolutionBlock({ solution }: { solution: DashboardSolution }) {
   // `tr` (not `t`) so it does not collide with the `t` task loop variable below.
   const tr = useT();
+  // Per-solution disclosure, persisted so the next visit keeps it (like the
+  // Miller column collapse - same localStorage store, namespaced id).
+  const { collapsed, toggle } = usePersistentCollapse(
+    `overview.sol.${solution.id}`,
+  );
   return (
     <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge-muted bg-canvas-subtle px-4 py-3">
+      <div
+        className={`flex flex-wrap items-center gap-x-4 gap-y-2 bg-canvas-subtle px-4 py-3 ${
+          collapsed ? "" : "border-b border-edge-muted"
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-2">
+          <button
+            onClick={toggle}
+            aria-expanded={!collapsed}
+            title={tr(collapsed ? "common.expand" : "common.collapse")}
+            className="-ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-subtle transition-colors hover:bg-neutral-muted hover:text-fg"
+          >
+            <Icon
+              name="chevron"
+              size={13}
+              className={`transition-transform ${collapsed ? "" : "rotate-90"}`}
+            />
+          </button>
           <span
             className="shrink-0"
-            style={{ color: solution.color || "var(--accent)" }}
+            style={{ color: solutionColor(solution.id) }}
           >
             <Icon name="solution" size={16} />
           </span>
@@ -171,7 +221,7 @@ export function SolutionBlock({ solution }: { solution: DashboardSolution }) {
           />
         </div>
       </div>
-      {solution.recentTasks && solution.recentTasks.length > 0 && (
+      {!collapsed && solution.recentTasks && solution.recentTasks.length > 0 && (
         <div className="px-3 py-2">
           <div className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.5px] text-fg-subtle">
             <Icon name="clock" size={12} />

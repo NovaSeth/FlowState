@@ -186,3 +186,16 @@ extension Color {
         self.init(nsColor: ns)
     }
 }
+
+/// Deterministic per-solution accent color: same hash + palette as the web
+/// (src/lib/solution-color.ts) - keep them in lockstep. The manual color picker
+/// was removed, so the hue is derived from the solution id.
+private let SOLUTION_PALETTE = [
+    "#3b82f6", "#22c55e", "#f59e0b", "#a855f7",
+    "#ef4444", "#14b8a6", "#ec4899", "#84cc16",
+]
+
+func solutionColor(_ id: String) -> Color {
+    let sum = id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+    return Color(hex: SOLUTION_PALETTE[sum % SOLUTION_PALETTE.count]) ?? DS.accent
+}

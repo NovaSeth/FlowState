@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { DailyByStatus, TaskStatus } from "@/lib/types";
 import { STATUS_META } from "@/lib/labels";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
@@ -50,6 +51,9 @@ function shortDay(day: string): string {
 export function DailyChart({ data }: { data: DailyByStatus }) {
   const t = useT();
   const reduced = useReducedMotion();
+  // Day under the cursor: drives the vertical guide + the per-status summary
+  // tooltip (hovering anywhere in the plot snaps to the nearest day).
+  const [hoverDi, setHoverDi] = useState<number | null>(null);
 
   const { days, statuses, counts } = data;
   const hasData =
@@ -90,8 +94,26 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
     return { id: status, name, stroke, points };
   });
 
+  // Snap the cursor to the nearest day: fraction of the SVG width -> viewBox X
+  // -> day index (the SVG stretches, so plain proportions are enough).
+  function onMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const vbX = ((e.clientX - rect.left) / rect.width) * VB_WIDTH;
+    const di =
+      days.length === 1
+        ? 0
+        : Math.round(((vbX - PAD_LEFT) / PLOT_W) * (days.length - 1));
+    setHoverDi(Math.max(0, Math.min(days.length - 1, di)));
+  }
+
+  const hoverLeftPct =
+    hoverDi === null ? 0 : (xFor(hoverDi) / VB_WIDTH) * 100;
+  // Flip the tooltip to the other side of the guide near the right edge.
+  const hoverFlip = hoverDi !== null && hoverDi > (days.length - 1) / 2;
+
   return (
-    <div className="rounded-lg border border-edge bg-canvas p-4 shadow-resting">
+    <div className="relative rounded-lg border border-edge bg-canvas p-4 shadow-resting">
       <svg
         viewBox={`0 0 ${VB_WIDTH} ${VB_HEIGHT}`}
         preserveAspectRatio="none"
@@ -99,7 +121,20 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
         className="h-44 w-full"
         role="img"
         aria-label={`${t("overview.dailyChartTitle")}: ${statuses.length}, ${days.length}`}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHoverDi(null)}
       >
+        {/* Hover guide: a solid, clearly visible line on the hovered day. */}
+        {hoverDi !== null && (
+          <line
+            x1={xFor(hoverDi)}
+            y1={PAD_TOP}
+            x2={xFor(hoverDi)}
+            y2={PAD_TOP + PLOT_H}
+            className="stroke-fg-muted"
+            strokeWidth={2}
+          />
+        )}
         {/* Optional mid gridline. */}
         {midValue !== null && (
           <>
@@ -186,6 +221,41 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
           </g>
         ))}
       </svg>
+
+      {/* Day summary tooltip: date + every status' transition count that day. */}
+      {hoverDi !== null && (
+        <div
+          className="pointer-events-none absolute top-6 z-10"
+          style={{
+            left: `${hoverLeftPct}%`,
+            transform: hoverFlip ? "translateX(calc(-100% - 10px))" : "translateX(10px)",
+          }}
+        >
+          <div className="min-w-[150px] rounded-md border border-edge bg-canvas px-2.5 py-2 shadow-hover">
+            <div className="mb-1 font-mono text-[10px] text-fg-subtle">
+              {days[hoverDi]}
+            </div>
+            {statuses.map((status, si) => (
+              <div
+                key={status}
+                className="flex items-center gap-1.5 py-0.5 text-[11px]"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                  style={{ backgroundColor: STATUS_LINE_COLOR[status] }}
+                />
+                <span className="text-fg-muted">
+                  {t(STATUS_META[status].labelKey)}
+                </span>
+                <span className="ml-auto pl-3 font-mono tabular-nums text-fg">
+                  {counts[hoverDi]?.[si] ?? 0}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Legend below the plot: wrapping row of swatch + status label. */}
       <ul className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">

@@ -45,6 +45,7 @@ import {
   NewTaskForm,
 } from "./forms";
 import { TaskPanel } from "./TaskPanel";
+import { ProjectPanel } from "./ProjectPanel";
 import { Pulse } from "./Pulse";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { Icon } from "./icons";
@@ -121,6 +122,9 @@ export function Explorer({
   const [projId, setProjId] = useState<string | null>(null);
   const [msId, setMsId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  // Project whose dashboard drawer is open (kebab "Open dashboard"); mutually
+  // exclusive with the task panel - both live on the same right edge.
+  const [dashProjId, setDashProjId] = useState<string | null>(null);
 
   const [taskView, setTaskView] = useState<TaskView>("list");
   const [showClosed, setShowClosed] = useState(false);
@@ -204,6 +208,7 @@ export function Explorer({
   }
   function openTask(id: string) {
     pushNav();
+    setDashProjId(null);
     setTaskId(id);
   }
 
@@ -294,7 +299,6 @@ export function Explorer({
                 editTitle={t("entity.editSolution")}
                 name={s.name}
                 description={s.description ?? ""}
-                color={s.color || "#0969da"}
                 status={s.status}
                 statusOptions={optionsFrom(
                   SOLUTION_STATUSES,
@@ -362,7 +366,10 @@ export function Explorer({
           actions={
             <EntityMenu
               editTitle={t("entity.editProject")}
-              openHref={`/projects/${p.id}`}
+              onOpen={() => {
+                setTaskId(null);
+                setDashProjId(p.id);
+              }}
               openLabel={t("entity.openDashboard")}
               name={p.name}
               description={p.description ?? ""}
@@ -586,6 +593,19 @@ export function Explorer({
     />
   );
 
+  // Live rollup for the dashboard drawer: read from the projects column state,
+  // so SSE refetches keep the drawer's numbers fresh.
+  const dashProject = projects.find((p) => p.id === dashProjId) ?? null;
+  const projectPanel = (
+    <ProjectPanel
+      project={dashProject}
+      solutionName={
+        solutions.find((s) => s.id === dashProject?.solutionId)?.name
+      }
+      onClose={() => setDashProjId(null)}
+    />
+  );
+
   // --- mobile view: one level at full width ---
   if (narrow) {
     const level = msId ? 3 : projId ? 2 : solId ? 1 : 0;
@@ -640,6 +660,7 @@ export function Explorer({
           {body}
         </div>
         {taskPanel}
+        {projectPanel}
       </>
     );
   }
@@ -693,6 +714,7 @@ export function Explorer({
         )}
       </div>
       {taskPanel}
+      {projectPanel}
     </>
   );
 }
