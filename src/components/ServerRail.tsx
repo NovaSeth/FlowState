@@ -68,7 +68,7 @@ export function ServerRail() {
   return (
     <nav
       aria-label={t("servers.rail")}
-      className="relative flex w-16 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-black/10 bg-gray-200 pb-3 pt-2"
+      className="relative flex w-16 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r-2 border-white bg-brand pb-3 pt-2"
     >
       {/* Plain text list (no icons): "local" on top, then the saved hosts. */}
       <RailEntry
@@ -94,7 +94,7 @@ export function ServerRail() {
         onClick={() => setAdding(true)}
         aria-label={t("servers.add")}
         title={t("servers.add")}
-        className="mt-1 w-14 rounded-md py-1.5 text-center font-mono text-sm leading-none text-gray-500 transition-colors hover:bg-brand/10 hover:text-brand"
+        className="mt-1 w-14 rounded-md py-1.5 text-center font-mono text-sm leading-none text-white/70 transition-colors hover:bg-white/15 hover:text-white"
       >
         +
       </button>
@@ -156,8 +156,8 @@ function RailEntry({
         title={label}
         className={`w-14 break-all rounded-md px-1 py-1.5 text-center font-mono text-[9px] leading-tight transition-colors ${
           active
-            ? "bg-brand text-white"
-            : "text-gray-600 hover:bg-brand/10 hover:text-brand"
+            ? "bg-white text-brand"
+            : "text-white/80 hover:bg-white/15 hover:text-white"
         }`}
       >
         {text}
@@ -167,7 +167,7 @@ function RailEntry({
           onClick={onRemove}
           aria-label={removeLabel}
           title={removeLabel}
-          className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-gray-300 text-gray-600 hover:bg-danger hover:text-white group-hover:flex"
+          className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-white/30 text-white hover:bg-danger hover:text-white group-hover:flex"
         >
           <Icon name="close" size={10} />
         </button>

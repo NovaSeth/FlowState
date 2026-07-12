@@ -12,11 +12,6 @@ struct ServerRailView: View {
 
     @State private var adding = false
 
-    // Light gray strip (deliberately NOT white and NOT the dark canvas) with a
-    // plain text list: "local" on top, then the saved hosts/IPs - no icons.
-    private let railBg = Color(white: 0.88)
-    private let inkMuted = Color(white: 0.4)
-
     var body: some View {
         VStack(spacing: 4) {
             entry(
@@ -38,7 +33,7 @@ struct ServerRailView: View {
                 Text("+")
                     .font(.system(size: 14, design: .monospaced))
                     .frame(width: 56, height: 24)
-                    .foregroundStyle(inkMuted)
+                    .foregroundStyle(.white.opacity(0.7))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -49,8 +44,9 @@ struct ServerRailView: View {
         .padding(.top, 8).padding(.bottom, 12)
         .frame(width: 64)
         .frame(maxHeight: .infinity)
-        .background(railBg)
-        .overlay(Rectangle().frame(width: 1).foregroundStyle(.black.opacity(0.1)), alignment: .trailing)
+        // Blue like the nav rail; a white divider line separates the two rails.
+        .background(DS.brand)
+        .overlay(Rectangle().frame(width: 2).foregroundStyle(.white), alignment: .trailing)
         .sheet(isPresented: $adding) { AddConnectionSheet() }
     }
 
@@ -58,6 +54,7 @@ struct ServerRailView: View {
         _Concurrency.Task { await store.switchConnection(id) }
     }
 
+    // Nav-rail palette: active = white pill + brand text, inactive = white/80.
     private func entry(
         label: String, text: String, active: Bool,
         onTap: @escaping () -> Void,
@@ -70,8 +67,8 @@ struct ServerRailView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 4).padding(.vertical, 6)
                 .frame(width: 56)
-                .background(active ? DS.brand : Color.clear)
-                .foregroundStyle(active ? .white : inkMuted)
+                .background(active ? Color.white : Color.clear)
+                .foregroundStyle(active ? DS.brand : .white.opacity(0.8))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
