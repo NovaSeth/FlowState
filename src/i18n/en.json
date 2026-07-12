@@ -192,6 +192,18 @@
     "noOutcome": "None",
     "save": "Save"
   },
+  "servers": {
+    "rail": "Data sources",
+    "local": "local",
+    "add": "Add server",
+    "remove": "Remove server",
+    "namePlaceholder": "Name (e.g. Studio Mac)",
+    "hostPlaceholder": "Host / IP",
+    "keyPlaceholder": "API key (fsk_...)",
+    "addHint": "Another Flow State instance: host, port and an API key minted on that server.",
+    "switchError": "Could not switch the data source",
+    "addError": "Could not add the server"
+  },
   "settings": {
     "eyebrow": "Settings",
     "viewMode": "View mode (SSR)",
@@ -201,6 +213,17 @@
     "adminSet": "set",
     "adminOpen": "none (open mode)",
     "dbPath": "Database (FS_DB_PATH)",
+    "appSection": "Application",
+    "serverSection": "Server (data source)",
+    "appVersion": "App version",
+    "serverVersion": "Source version",
+    "source": "Data source",
+    "requireKey": "Require API key",
+    "requireKeyHint": "Every client (dashboard, menu-bar, agents) must present a key; settings stay reachable.",
+    "dashboardKey": "This browser's key",
+    "dashboardKeyHint": "Attached to dashboard requests; needed while require-key is on.",
+    "remoteNoControl": "remote source - not controllable from here",
+    "savedTick": "Saved",
     "language": "Language",
     "languageHint": "Interface language. Changing it reloads the app.",
     "server": {

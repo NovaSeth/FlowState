@@ -403,6 +403,36 @@ public struct DailyByStatus: Codable, Sendable {
     public let counts: [[Int]]
 }
 
+/// A saved remote Flow State instance (the stored API key never leaves the server).
+public struct FSConnection: Codable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let host: String
+    public let port: Int
+    public let createdAt: String
+}
+
+public struct ConnectionsPayload: Decodable, Sendable {
+    public let connections: [FSConnection]
+    /// Active data source; nil = the local database.
+    public let activeId: String?
+}
+
+public struct AppSettingsPayload: Decodable, Sendable {
+    public struct ActiveConnection: Decodable, Sendable {
+        public let id: String
+        public let name: String
+        public let host: String
+        public let port: Int
+    }
+    public let requireKey: Bool
+    /// This server's build version (optional: older servers omit it).
+    public let version: String?
+    /// The ACTIVE data source's build version (nil: remote doesn't expose it).
+    public let sourceVersion: String?
+    public let activeConnection: ActiveConnection?
+}
+
 public struct DashboardPayload: Decodable, Sendable {
     public struct Totals: Codable, Sendable {
         public let solutions: Int

@@ -3,6 +3,7 @@
 import { ReactNode } from "react";
 import Link from "next/link";
 import { NavRail, MobileTabBar } from "./NavRail";
+import { ServerRail, ConnectionBadge } from "./ServerRail";
 import { Celebrations } from "./Celebrations";
 import { OfflineOverlay } from "./OfflineOverlay";
 import { BrandMark } from "./BrandMark";
@@ -34,6 +35,7 @@ export function Shell({ children }: { children: ReactNode }) {
   // Mobile: header + content + bottom tab-bar (rail hidden).
   return (
     <div className="flex h-dvh overflow-hidden">
+      {!narrow && <ServerRail />}
       {!narrow && <NavRail />}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <header className="shrink-0 border-b border-edge bg-canvas pt-[env(safe-area-inset-top)]">
@@ -49,6 +51,10 @@ export function Shell({ children }: { children: ReactNode }) {
                 {t("app.brandRest")}
               </span>
             </Link>
+            {/* Which data source this dashboard shows: local or a remote FS. */}
+            <span className="ml-2">
+              <ConnectionBadge />
+            </span>
             <div className="ml-auto flex items-center gap-3">
               <Scoreboard />
             </div>

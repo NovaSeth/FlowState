@@ -349,6 +349,30 @@ export interface DailyByStatus {
   counts: number[][];
 }
 
+/** A saved remote Flow State instance (the stored API key never leaves the server). */
+export interface Connection {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  createdAt: string;
+}
+
+export interface ConnectionsPayload {
+  connections: Connection[];
+  /** Active data source; null = the local database. */
+  activeId: string | null;
+}
+
+export interface AppSettingsPayload {
+  requireKey: boolean;
+  /** This server's build version. */
+  version: string;
+  /** The ACTIVE data source's build version (null: remote doesn't expose it). */
+  sourceVersion: string | null;
+  activeConnection: { id: string; name: string; host: string; port: number } | null;
+}
+
 export interface DashboardPayload {
   totals: {
     solutions: number;

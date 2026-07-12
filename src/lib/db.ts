@@ -241,6 +241,24 @@ function migrate(db: DatabaseSync): void {
     db.exec(`ALTER TABLE api_keys ADD COLUMN secret TEXT`);
   }
 
+  // Multi-instance: saved remote Flow State connections plus a tiny app-settings
+  // K/V store (active connection id, require-key mode). The local SQLite stays
+  // the default data source; an ACTIVE connection turns /api into a proxy.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS connections (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      apiKey TEXT NOT NULL DEFAULT '',
+      createdAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
   // New tables (artifacts, soft links) - on an existing database SCHEMA creates
   // them via IF NOT EXISTS, but we create them explicitly in case of an older file.
   db.exec(`

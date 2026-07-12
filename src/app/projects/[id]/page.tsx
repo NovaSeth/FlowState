@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { repo } from "@/lib/repo";
+import { projectPageData } from "@/lib/data-source";
 import { ProjectView } from "@/components/ProjectView";
 import { LiveRefresher } from "@/components/LiveRefresher";
 
@@ -15,22 +15,17 @@ export default async function ProjectPage({
 }) {
   const { id } = await params;
   const { task } = await searchParams;
-  const r = repo();
 
-  const project = r.getProjectRollup(id);
-  if (!project) notFound();
-
-  const solution = r.getSolution(project.solutionId);
-  const milestones = r.listMilestones(id);
-  const tasks = r.listTasks({ projectId: id });
+  const data = await projectPageData(id);
+  if (!data) notFound();
 
   return (
     <>
       <ProjectView
-        project={project}
-        solution={solution}
-        milestones={milestones}
-        tasks={tasks}
+        project={data.project}
+        solution={data.solution}
+        milestones={data.milestones}
+        tasks={data.tasks}
         initialTaskId={task}
       />
       <LiveRefresher />

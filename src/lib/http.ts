@@ -4,6 +4,11 @@ import { publishChange } from "@/lib/events";
 import { repo } from "@/lib/repo";
 import { runWithContext, type RequestContext } from "@/lib/context";
 import { safeEqual } from "@/lib/auth";
+import {
+  getActiveConnection,
+  requireKeyEnabled,
+  type ConnectionWithKey,
+} from "@/lib/connections";
 
 const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
@@ -173,6 +178,12 @@ function resolveContext(req: Request): RequestContext {
     if (!isTrustedKeylessClient(req)) {
       throw new AppError(401, "Missing x-api-key header");
     }
+    // Require-key mode (Settings): even the trusted local clients must present
+    // a key on data routes. The settings/connections endpoints stay reachable
+    // keyless so the mode can always be inspected and turned off (no lockout).
+    if (requireKeyEnabled() && !isManagementPath(req)) {
+      throw new AppError(401, "API key required (require-key mode is on)");
+    }
     if (mutating && (hasAdmin || strict)) {
       throw new AppError(401, "Missing x-api-key header");
     }
@@ -210,6 +221,45 @@ export function handleError(e: unknown): Response {
   return json({ error: "Internal server error" }, 500);
 }
 
+/** Connection/settings management always runs against THIS server, never the
+ *  proxied remote (you manage your connections locally, and you must be able
+ *  to switch back). */
+function isManagementPath(req: Request): boolean {
+  const pathname = new URL(req.url).pathname;
+  return pathname.startsWith("/api/connections") || pathname === "/api/settings";
+}
+
+/**
+ * Transparent proxy for the active remote source: same method/path/query/body,
+ * with the connection's stored key attached. The remote instance does its own
+ * authorization; its JSON (including errors) is passed through verbatim.
+ */
+async function proxyToRemote(
+  req: Request,
+  c: ConnectionWithKey,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const target = `http://${c.host}:${c.port}${url.pathname}${url.search}`;
+  const headers: Record<string, string> = {
+    "content-type": req.headers.get("content-type") ?? "application/json",
+  };
+  if (c.apiKey) headers["x-api-key"] = c.apiKey;
+  const init: RequestInit = { method: req.method, headers };
+  if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.text();
+  let res: Response;
+  try {
+    res = await fetch(target, init);
+  } catch {
+    throw new AppError(502, `Remote Flow State unreachable (${c.host}:${c.port})`);
+  }
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: {
+      "content-type": res.headers.get("content-type") ?? "application/json",
+    },
+  });
+}
+
 type RouteContext = { params: Promise<Record<string, string>> };
 
 type Handler = (
@@ -233,9 +283,16 @@ export function route(fn: Handler) {
       if (rateLimited(rateKey(req, reqCtx.keyId))) {
         return json({ error: "Too many requests" }, 429);
       }
-      // Run the handler within the identity context - repo reads currentActorId()
-      // when writing attribution (activity, ownerActorId).
-      const res = await runWithContext(reqCtx, () => fn(req, ctx));
+      // Remote source active: every data route becomes a transparent proxy to
+      // the connected instance (management endpoints stay local). The local
+      // identity gate above still applies - who may TALK to this server is a
+      // local decision; what they see is the remote's.
+      const active = isManagementPath(req) ? null : getActiveConnection();
+      const res = active
+        ? await proxyToRemote(req, active)
+        : // Run the handler within the identity context - repo reads
+          // currentActorId() when writing attribution (activity, ownerActorId).
+          await runWithContext(reqCtx, () => fn(req, ctx));
       // Successful mutation -> broadcast the change so open dashboards refresh live.
       if (MUTATING.has(req.method) && res.status < 400) {
         publishChange(`${req.method} ${new URL(req.url).pathname}`);

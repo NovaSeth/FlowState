@@ -2,15 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { UI_VERSION } from "@/lib/version";
 import { Icon, IconName } from "./icons";
 import { useT } from "@/i18n/provider";
-
-// UI version. Scheme vMAJOR.MINOR: MINOR grows +1 per shipped feature (a
-// single-feature commit bumps by 1; a batch commit bumps by the number of
-// features it lands), MAJOR jumps when we turn the concept upside down
-// (-> 2.00). Bump it on every commit that touches the UI.
-// Shared with the native macOS app (CFBundleShortVersionString in macos/build.sh).
-const UI_VERSION = "1.51";
 
 // Main menu (sidebar). Order from the top: Overview, Explorer, Users; Settings
 // is pinned to the bottom of the rail, right above the version marker.
@@ -53,6 +49,15 @@ const ITEMS: {
 export function NavRail() {
   const pathname = usePathname();
   const t = useT();
+  // The version marker reflects the ACTIVE data source: the remote instance's
+  // version when connected, this build's otherwise.
+  const [version, setVersion] = useState(UI_VERSION);
+  useEffect(() => {
+    api
+      .getAppSettings()
+      .then((s) => setVersion(s.sourceVersion ?? UI_VERSION))
+      .catch(() => {});
+  }, []);
 
   const railItem = (item: (typeof ITEMS)[number]) => {
     const on = item.match(pathname);
@@ -86,9 +91,9 @@ export function NavRail() {
       <span className="mt-auto">{railItem(settings)}</span>
       <span
         className="select-none pt-2 font-mono text-[9px] tracking-tight text-white/70"
-        title={`UI ${UI_VERSION}`}
+        title={`UI ${version}`}
       >
-        v{UI_VERSION}
+        v{version}
       </span>
     </nav>
   );

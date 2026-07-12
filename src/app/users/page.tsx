@@ -1,19 +1,20 @@
-import { repo } from "@/lib/repo";
+import { usersPageData } from "@/lib/data-source";
 import { UsersExplorer } from "@/components/UsersExplorer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export default function UsersPage() {
+export default async function UsersPage() {
   // Cascading identity explorer (Miller columns / mobile drill-down). The first
-  // column is SSR; deeper levels (activity) are fetched via REST.
-  const r = repo();
+  // column is SSR (local repo or the active remote source); deeper levels
+  // (activity) are fetched via REST.
+  const d = await usersPageData();
   return (
     <UsersExplorer
-      initialActors={r.listActors()}
-      initialKeys={r.listApiKeys()}
-      initialSolutions={r.listSolutions()}
-      initialProjects={r.listProjects()}
+      initialActors={d.actors}
+      initialKeys={d.keys}
+      initialSolutions={d.solutions}
+      initialProjects={d.projects}
     />
   );
 }

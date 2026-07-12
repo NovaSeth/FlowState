@@ -58,6 +58,14 @@ final class AppStore: ObservableObject {
     @Published private(set) var isOnline = true
     @Published var errorMessage: String?
 
+    // Multi-instance data sources (server-side switch; this app stays a client
+    // of the LOCAL server, which proxies to the active remote instance).
+    @Published private(set) var connections: [FSConnection] = []
+    @Published private(set) var activeConnectionId: String?
+    @Published private(set) var requireKey = false
+    /// The active data source's build version (remote when connected).
+    @Published private(set) var sourceVersion: String?
+
     // Gamification: a pop counter the scoreboard animates on when today's totals
     // grow, and a "YOU WIN" banner when a project or solution completes.
     enum WinKind { case project, solution }
@@ -95,6 +103,7 @@ final class AppStore: ObservableObject {
     @MainActor
     func bootstrap() async {
         await reloadOverview()
+        await loadConnections()
         await startEvents()
     }
 
@@ -261,6 +270,72 @@ final class AppStore: ObservableObject {
     @MainActor
     func keyToken(_ id: String) async -> String? {
         do { return try await api.keySecret(id: id) } catch { capture(error); return nil }
+    }
+
+    // MARK: - Multi-instance connections (the server rail)
+
+    @MainActor
+    func loadConnections() async {
+        do {
+            let payload = try await api.connections()
+            connections = payload.connections
+            activeConnectionId = payload.activeId
+            let settings = try await api.appSettings()
+            requireKey = settings.requireKey
+            sourceVersion = settings.sourceVersion
+        } catch { capture(error) }
+    }
+
+    /// Switch the data source (nil = local). On success every screen reloads
+    /// from scratch - selections would dangle across two different worlds.
+    @MainActor
+    func switchConnection(_ id: String?) async {
+        guard id != activeConnectionId else { return }
+        do {
+            try await api.setActiveConnection(id: id)
+        } catch {
+            capture(error)
+            return
+        }
+        activeConnectionId = id
+        selectedSolutionId = nil; selectedProjectId = nil; selectedMilestoneId = nil; selectedTaskId = nil
+        projects = []; milestones = []; tasks = []; taskDetail = nil
+        closeProjectDashboard()
+        dashboard = nil
+        await reloadOverview()
+        await loadConnections()
+    }
+
+    @MainActor
+    func addConnection(name: String, host: String, port: Int, apiKey: String) async -> Bool {
+        do {
+            try await api.createConnection(name: name, host: host, port: port, apiKey: apiKey)
+            await loadConnections()
+            return true
+        } catch {
+            capture(error)
+            return false
+        }
+    }
+
+    @MainActor
+    func removeConnection(_ id: String) async {
+        do {
+            let wasActive = id == activeConnectionId
+            try await api.deleteConnection(id: id)
+            await loadConnections()
+            if wasActive { await switchConnection(nil) }
+        } catch { capture(error) }
+    }
+
+    @MainActor
+    func setRequireKey(_ on: Bool) async {
+        do { requireKey = try await api.setRequireKey(on).requireKey } catch { capture(error) }
+    }
+
+    /// The active remote connection's rollup for the header badge (nil = local).
+    var activeConnection: FSConnection? {
+        connections.first { $0.id == activeConnectionId }
     }
 
     // MARK: - Gamification (scoreboard pop + "YOU WIN" banner)

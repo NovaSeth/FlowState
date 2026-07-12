@@ -1,4 +1,5 @@
 import { subscribeChanges } from "@/lib/events";
+import { getActiveConnection } from "@/lib/connections";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,36 @@ export const dynamic = "force-dynamic";
  * (which is reserved for real data changes -> refetch).
  */
 export async function GET(): Promise<Response> {
+  // Remote source active: pipe the remote instance's SSE stream through, so
+  // dashboards and the native app refresh on REMOTE changes (their own
+  // EventSource keeps pointing at this server). If the remote is unreachable
+  // we fall through to the local stream - its pings keep the connection dot
+  // honest and the switch back to local stays reachable.
+  const active = getActiveConnection();
+  if (active) {
+    try {
+      // No abort timeout here: it would sever the piped stream mid-flight.
+      // A dead host fails fast (refused); typos are caught at activation.
+      const upstream = await fetch(
+        `http://${active.host}:${active.port}/api/events`,
+        {
+          headers: active.apiKey ? { "x-api-key": active.apiKey } : undefined,
+        },
+      );
+      if (upstream.ok && upstream.body) {
+        return new Response(upstream.body, {
+          headers: {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache, no-transform",
+            connection: "keep-alive",
+          },
+        });
+      }
+    } catch {
+      // fall through to the local stream
+    }
+  }
+
   const encoder = new TextEncoder();
   let unsubscribe = () => {};
   let heartbeat: ReturnType<typeof setInterval>;

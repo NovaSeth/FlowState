@@ -5,6 +5,9 @@ import type {
   Activity,
   ApiKey,
   ApiKeyWithSecret,
+  AppSettingsPayload,
+  Connection,
+  ConnectionsPayload,
   CreateActorInput,
   CreateApiKeyInput,
   Comment,
@@ -30,11 +33,27 @@ import type {
   UpdateTaskInput,
 } from "./types";
 
+/** Optional dashboard key (Settings): required when the server runs in
+ *  require-key mode; attached to every call when set. */
+function dashboardKey(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem("fs.dashboardKey");
+  } catch {
+    return null;
+  }
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
+  const key = dashboardKey();
   const res = await fetch(url, {
     // x-fs-dashboard marks this as the local dashboard so the API trusts it
     // keyless even over plain HTTP/LAN (a phone), where Sec-Fetch-* is absent.
-    headers: { "content-type": "application/json", "x-fs-dashboard": "1" },
+    headers: {
+      "content-type": "application/json",
+      "x-fs-dashboard": "1",
+      ...(key ? { "x-api-key": key } : {}),
+    },
     ...init,
   });
   if (!res.ok) {
@@ -121,6 +140,22 @@ export const api = {
   /** Full token for the "show" reveal (null: key predates secret storage). */
   getKeySecret: (id: string) =>
     req<{ token: string | null }>(`/api/keys/${id}/secret`),
+  // multi-instance connections + app settings
+  listConnections: () => req<ConnectionsPayload>("/api/connections"),
+  createConnection: (b: {
+    name: string;
+    host: string;
+    port: number;
+    apiKey?: string;
+  }) => req<Connection>("/api/connections", post(b)),
+  deleteConnection: (id: string) => req<void>(`/api/connections/${id}`, del),
+  /** Switch the data source (null = back to local). Health-checked server-side. */
+  setActiveConnection: (activeId: string | null) =>
+    req<{ activeId: string | null }>("/api/connections", patch({ activeId })),
+  getAppSettings: () => req<AppSettingsPayload>("/api/settings"),
+  setRequireKey: (requireKey: boolean) =>
+    req<AppSettingsPayload>("/api/settings", patch({ requireKey })),
+
   listActivity: (
     filter: {
       solutionId?: string;

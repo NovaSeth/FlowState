@@ -21,6 +21,30 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Added
 
+- **Multi-instance data sources.** Flow State stays local by default but can
+  now connect to other Flow State instances: a new white connections rail on
+  the far left (the visual inverse of the blue nav rail) lists `local`, every
+  saved remote server (initials + host) and a `+` to add one (name, host,
+  port, API key). Clicking an entry switches the ACTIVE source on the server:
+  the whole `/api` surface becomes a transparent proxy to the remote instance
+  (with its stored key), SSE is piped through, and the server-rendered pages
+  read over REST - so the web dashboard, the native macOS app and MCP agents
+  all see the remote data without any client-side changes. A remote target is
+  health-checked before the switch. A `local`/name badge next to the Flow
+  State brand shows the active source (web + macOS), and while remote is
+  active the server start/stop controls are hidden - a remote instance is not
+  ours to control.
+- The version marker in the nav rail and the Settings screen now reflect the
+  ACTIVE data source: Settings splits into an **Application** section (this
+  client's build, view mode, browser key, language) and a **Server (data
+  source)** section (source, its version via `/api/settings`, admin key, DB,
+  require-key, server controls) - web + macOS.
+- **Require API key** switch in Settings (web + macOS): when on, the trusted
+  keyless heuristics stop being enough on data routes - every client must
+  present a key. The settings/connections endpoints stay reachable keyless so
+  the mode can always be turned off (no lockout), and the web Settings gained
+  a "this browser's key" field (localStorage) so the dashboard keeps working
+  in that mode.
 - API keys can be revealed in the Users panel: a **Token / Show** row in the
   key details (web + macOS) returns the full `fsk_...` token. Backed by a new
   plaintext `secret` column (an explicit decision for this local single-user

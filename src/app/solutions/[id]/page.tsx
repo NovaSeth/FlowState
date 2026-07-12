@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { repo } from "@/lib/repo";
+import { solutionPageData } from "@/lib/data-source";
 import { SolutionBlock } from "@/components/dashboard";
 import { DeleteSolutionButton } from "@/components/SolutionActions";
 import { LiveRefresher } from "@/components/LiveRefresher";
@@ -17,12 +17,10 @@ export default async function SolutionPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const r = repo();
 
-  const solution = r.getSolutionRollup(id);
-  if (!solution) notFound();
-
-  const projects = r.listProjects(id);
+  const data = await solutionPageData(id);
+  if (!data) notFound();
+  const { solution, projects } = data;
   // Server component: translation via serverT (reads the fs_locale cookie).
   const t = await serverT();
 

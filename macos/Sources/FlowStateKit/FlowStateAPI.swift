@@ -68,6 +68,40 @@ public struct FlowStateAPI: Sendable {
         return payload.token
     }
 
+    // MARK: - Multi-instance connections + app settings
+
+    public func connections() async throws -> ConnectionsPayload {
+        try await get("/api/connections")
+    }
+
+    @discardableResult
+    public func createConnection(
+        name: String, host: String, port: Int, apiKey: String
+    ) async throws -> FSConnection {
+        try await send("POST", "/api/connections",
+                       body: ["name": name, "host": host, "port": port, "apiKey": apiKey])
+    }
+
+    public func deleteConnection(id: String) async throws {
+        try await delete("/api/connections/\(id)")
+    }
+
+    /// Switch the data source (nil = back to local). Health-checked server-side.
+    public func setActiveConnection(id: String?) async throws {
+        struct Payload: Decodable { let activeId: String? }
+        let _: Payload = try await send("PATCH", "/api/connections",
+                                        body: ["activeId": id ?? NSNull()])
+    }
+
+    public func appSettings() async throws -> AppSettingsPayload {
+        try await get("/api/settings")
+    }
+
+    @discardableResult
+    public func setRequireKey(_ on: Bool) async throws -> AppSettingsPayload {
+        try await send("PATCH", "/api/settings", body: ["requireKey": on])
+    }
+
     public func activity(entityId: String? = nil, actorId: String? = nil, limit: Int? = nil) async throws -> [Activity] {
         var query: [String: String] = [:]
         if let entityId { query["entityId"] = entityId }

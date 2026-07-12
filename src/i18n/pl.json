@@ -192,6 +192,18 @@
     "noOutcome": "Brak",
     "save": "Zapisz"
   },
+  "servers": {
+    "rail": "Zrodla danych",
+    "local": "local",
+    "add": "Dodaj serwer",
+    "remove": "Usun serwer",
+    "namePlaceholder": "Nazwa (np. Mac w studio)",
+    "hostPlaceholder": "Host / IP",
+    "keyPlaceholder": "Klucz API (fsk_...)",
+    "addHint": "Inna instancja Flow State: host, port i klucz API z tamtego serwera.",
+    "switchError": "Nie udalo sie przelaczyc zrodla danych",
+    "addError": "Nie udalo sie dodac serwera"
+  },
   "settings": {
     "eyebrow": "Ustawienia",
     "viewMode": "Tryb widoku (SSR)",
@@ -201,6 +213,17 @@
     "adminSet": "ustawiony",
     "adminOpen": "brak (tryb otwarty)",
     "dbPath": "Baza (FS_DB_PATH)",
+    "appSection": "Aplikacja",
+    "serverSection": "Serwer (zrodlo danych)",
+    "appVersion": "Wersja aplikacji",
+    "serverVersion": "Wersja zrodla",
+    "source": "Zrodlo danych",
+    "requireKey": "Wymagaj klucza API",
+    "requireKeyHint": "Kazdy klient (dashboard, menu-bar, agenci) musi podac klucz; ustawienia pozostaja dostepne.",
+    "dashboardKey": "Klucz tej przegladarki",
+    "dashboardKeyHint": "Doklejany do zadan dashboardu; potrzebny przy wymuszaniu klucza.",
+    "remoteNoControl": "zrodlo zdalne - brak kontroli stad",
+    "savedTick": "Zapisano",
     "language": "Jezyk",
     "languageHint": "Jezyk interfejsu. Zmiana przeladowuje aplikacje.",
     "server": {

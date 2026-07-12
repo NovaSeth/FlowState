@@ -9,6 +9,7 @@ struct DashboardRootView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            ServerRailView()
             NavRail()
             VStack(spacing: 0) {
                 TopBar()
@@ -55,7 +56,9 @@ struct NavRail: View {
             Spacer()
             // Settings pinned at the bottom, right above the version (web parity).
             navButton(.settings, "settings", i18n.t("nav.settings"))
-            Text("v\(uiVersion)")
+            // The marker reflects the ACTIVE data source's version (remote
+            // when connected), falling back to this app build's.
+            Text("v\(store.sourceVersion ?? uiVersion)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.top, 8)
@@ -99,6 +102,8 @@ struct TopBar: View {
             (Text(i18n.t("app.brandLead")).font(.system(size: 16, weight: .semibold))
                 + Text(i18n.t("app.brandRest")).font(.system(size: 16)))
                 .foregroundStyle(DS.fg)
+            // Which data source the app shows: local or a remote FS (web parity).
+            ConnectionBadge()
             Spacer()
             ScoreboardView()
         }
