@@ -152,6 +152,12 @@ body {
     0% { opacity: 0; transform: translateY(-4px); }
     100% { opacity: 1; transform: translateY(0); }
   }
+  /* Page content arriving (skeleton -> real data): a smooth fade + gentle rise,
+     so the swap reads as one graceful reveal rather than a hard cut. */
+  @keyframes fs-content-in {
+    0% { opacity: 0; transform: translateY(8px) scale(0.995); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
 
   .fs-flash {
     animation: fs-flash 0.8s ease-out;
@@ -163,5 +169,18 @@ body {
   }
   .fs-enter {
     animation: fs-enter 0.35s ease-out;
+  }
+  .fs-content-in {
+    animation: fs-content-in 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Arrival out of the wormhole: the interface rushes toward the viewer from
+     far away and settles with a tiny overshoot ("boom, locked in place"). */
+  @keyframes fs-arrive {
+    0%   { opacity: 0; transform: scale(0.72); filter: blur(4px); }
+    70%  { opacity: 1; transform: scale(1.03); filter: blur(0); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  .fs-arrive {
+    animation: fs-arrive 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) both;
   }
 }

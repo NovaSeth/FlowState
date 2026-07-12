@@ -52,6 +52,7 @@ import { Icon } from "./icons";
 import { useIsNarrow } from "@/lib/use-is-narrow";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
 import { useFlip } from "@/lib/use-flip";
+import { useFirstVisit } from "@/lib/route-visit";
 import { useT } from "@/i18n/provider";
 import {
   ColHint,
@@ -113,6 +114,7 @@ export function Explorer({
   initialSolutions: SolutionRollup[];
 }) {
   const t = useT();
+  const reveal = useFirstVisit();
   const [solutions, setSolutions] = useState(initialSolutions);
   const [projects, setProjects] = useState<ProjectRollup[]>([]);
   const [milestones, setMilestones] = useState<MilestoneRollup[]>([]);
@@ -668,7 +670,7 @@ export function Explorer({
   // --- desktop view: Miller columns board ---
   return (
     <>
-      <div className="flex h-full min-h-0 overflow-x-auto">
+      <div className={`${reveal} flex h-full min-h-0 overflow-x-auto`}>
         <Column
           title={t("explorer.solutions")}
           count={solutions.length}

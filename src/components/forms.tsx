@@ -20,7 +20,9 @@ function AddTrigger({
   return (
     <button
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-edge px-3 py-1.5 text-sm text-fg-muted transition-colors hover:border-accent hover:text-accent"
+      // Full-width, centered, accent-colored - consistent with the Users
+      // "Add actor / Add API key" CTAs (and the native macOS create form).
+      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-edge px-3 py-2 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-canvas-subtle"
     >
       <Icon name="plus" size={15} />
       {label}

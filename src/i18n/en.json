@@ -198,11 +198,14 @@
     "add": "Add server",
     "remove": "Remove server",
     "namePlaceholder": "Name (e.g. Studio Mac)",
+    "nameOptionalPlaceholder": "Name (optional)",
     "hostPlaceholder": "Host / IP",
     "keyPlaceholder": "API key (fsk_...)",
     "addHint": "Another Flow State instance: host, port and an API key minted on that server.",
     "switchError": "Could not switch the data source",
-    "addError": "Could not add the server"
+    "addError": "Could not add the server",
+    "switching": "Switching to",
+    "connectFailed": "Could not reach that server"
   },
   "settings": {
     "eyebrow": "Settings",

@@ -201,7 +201,8 @@ export interface Actor {
   id: string;
   kind: ActorKind;
   name: string;
-  /** The key that minted this actor (delegation); null for manually created ones. */
+  /** Audit breadcrumb: the key that provisioned this actor (no special rights);
+   *  null for manually created ones. */
   createdByKeyId: string | null;
   archivedAt: string | null;
   createdAt: string;

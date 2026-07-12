@@ -19,6 +19,7 @@ struct DashboardRootView: View {
         .frame(minWidth: 960, minHeight: 600)
         .overlay { if !store.isOnline { OfflineOverlay() } }
         .overlay { if let win = store.winBanner { WinOverlay(kind: win) } }
+        .overlay { if let name = store.switchingToName { ServerSwitchOverlay(label: name) } }
         .task { await store.bootstrap() }
         // Inject localization as the OUTERMOST modifier so the overlays above
         // (offline / win) inherit it too - otherwise they showed raw i18n keys.

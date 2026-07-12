@@ -12,6 +12,7 @@ import {
 } from "./dashboard";
 import { Eyebrow } from "./ui";
 import { DailyChart } from "./DailyChart";
+import { useFirstVisit } from "@/lib/route-visit";
 import { useT } from "@/i18n/provider";
 
 /**
@@ -24,12 +25,13 @@ import { useT } from "@/i18n/provider";
 export function Overview({ initial }: { initial: DashboardPayload }) {
   const [d, setD] = useState(initial);
   const t = useT();
+  const reveal = useFirstVisit();
   useLiveRefresh(() => {
     api.getDashboard().then(setD).catch(() => {});
   });
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 sm:px-6">
+    <div className={`${reveal} mx-auto max-w-6xl space-y-6 px-5 py-6 sm:px-6`}>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatTile
           label={t("overview.solutions")}

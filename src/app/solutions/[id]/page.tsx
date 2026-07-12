@@ -5,6 +5,7 @@ import { SolutionBlock } from "@/components/dashboard";
 import { DeleteSolutionButton } from "@/components/SolutionActions";
 import { LiveRefresher } from "@/components/LiveRefresher";
 import { Icon } from "@/components/icons";
+import { Reveal } from "@/components/Reveal";
 import { serverT } from "@/i18n/server";
 import { solutionColor } from "@/lib/solution-color";
 
@@ -25,7 +26,7 @@ export default async function SolutionPage({
   const t = await serverT();
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 px-6 py-6">
+    <Reveal className="mx-auto max-w-6xl space-y-5 px-6 py-6">
       <div>
         <nav className="flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle">
           <Link href="/" className="hover:text-accent">
@@ -60,6 +61,6 @@ export default async function SolutionPage({
           breakdown, while "recently" lives on the Overview screen. */}
       <SolutionBlock solution={{ ...solution, projects, recentTasks: [] }} />
       <LiveRefresher />
-    </div>
+    </Reveal>
   );
 }

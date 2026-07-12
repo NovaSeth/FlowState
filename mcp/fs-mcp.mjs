@@ -30,7 +30,7 @@ const INSTRUCTIONS = [
   "- read user feedback: fs_list_comments / fs_get_task with expandComments=true,",
   "- report progress: fs_update_task (status change), add new tasks with fs_create_task (also accepts a `tasks` array - bulk), comment with fs_add_comment.",
   "- when setting status=blocked, PROVIDE a reason (what unblocks it) - otherwise the API rejects it (422), unless the task already has a comment.",
-  "- identity (multi-agent): your key (FS_API_KEY) attributes authorship of mutations. fs_whoami = who you are; fs_list_activity = who changed what; when spawning sub-agents, mint them keys with fs_mint_agent_key (with ttlSeconds) and pass them in their FS_API_KEY.",
+  "- identity (multi-agent): your key (FS_API_KEY) attributes authorship of mutations. fs_whoami = who you are; fs_list_activity = who changed what; when spawning other agents, give each its OWN user + key via fs_mint_agent_key (one key = one user; set ttlSeconds) and pass it in their FS_API_KEY.",
   "- task structure: parentTaskId creates subtasks (the parent closes automatically once all subtasks are done; progress in fs_get_task), blockedBy: [taskId] are dependencies instead of writing them in the description, labels (e.g. external-blocker/needs-physical/code-only) classify - filter by them with fs_list_tasks({label}).",
   "The dashboard (UI) is live (SSE) and lets you manually change status/priority, add comments, and delete;",
   "but you create and change the structure (solutions/projects/milestones) and tasks through these tools (fs_create_* / fs_update_*).",
@@ -658,11 +658,11 @@ const TOOLS = [
   {
     name: "fs_mint_agent_key",
     description:
-      "Mint an API key for a sub-agent (delegation). Creates a new 'agent' actor with the given name and returns a token (shown ONCE) to pass to the sub-agent in its FS_API_KEY. Narrow it with `grants` - a list of places, each with its own rights: {solutionId} = a whole solution, {projectId} = one project, neither = global; scope read|write per grant (default write). Every grant must fit inside YOUR key's grants (delegation cannot widen). Legacy shorthand: top-level `solutionId`+`scope` = one grant. Set `ttlSeconds` (e.g. 7200 = 2h) so the key expires after the work. The parent (your key) is recorded as createdByKeyId.",
+      "Create a NEW agent user + its API key (one key = one user; there is no sub-key hierarchy). Creates a fresh 'agent' actor with the given name and returns a token (shown ONCE) to pass to that agent in its FS_API_KEY. Scope it with `grants` - a list of places, each with its own rights: {solutionId} = a whole solution, {projectId} = one project, neither = global; scope read|write per grant (default write). Safety rail: a non-admin key cannot grant access it does not itself hold. Legacy shorthand: top-level `solutionId`+`scope` = one grant. Set `ttlSeconds` (e.g. 7200 = 2h) so the key expires after the work.",
     inputSchema: {
       type: "object",
       properties: {
-        actorName: { type: "string", description: "Sub-agent name (e.g. 'voice-eval-worker')." },
+        actorName: { type: "string", description: "New agent's name (e.g. 'voice-eval-worker')." },
         grants: {
           type: "array",
           description:

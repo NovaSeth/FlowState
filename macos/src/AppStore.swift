@@ -60,11 +60,18 @@ final class AppStore: ObservableObject {
 
     // Multi-instance data sources (server-side switch; this app stays a client
     // of the LOCAL server, which proxies to the active remote instance).
+    enum SwitchPhase { case connecting, failed }
+
     @Published private(set) var connections: [FSConnection] = []
     @Published private(set) var activeConnectionId: String?
     @Published private(set) var requireKey = false
     /// The active data source's build version (remote when connected).
     @Published private(set) var sourceVersion: String?
+    /// Reachability per remote connection ({id: up?}) for the rail status dot.
+    @Published private(set) var connectionHealth: [String: Bool] = [:]
+    /// The source being connected to + the phase (drives the switch overlay).
+    @Published private(set) var switchingToName: String?
+    @Published private(set) var switchPhase: SwitchPhase?
 
     // Gamification: a pop counter the scoreboard animates on when today's totals
     // grow, and a "YOU WIN" banner when a project or solution completes.
@@ -284,17 +291,33 @@ final class AppStore: ObservableObject {
             requireKey = settings.requireKey
             sourceVersion = settings.sourceVersion
         } catch { capture(error) }
+        // Reachability dots - best-effort, never blocks the list.
+        connectionHealth = (try? await api.connectionsHealth()) ?? connectionHealth
     }
 
     /// Switch the data source (nil = local). On success every screen reloads
-    /// from scratch - selections would dangle across two different worlds.
+    /// from scratch - selections would dangle across two different worlds. A
+    /// delightful transition overlay plays for at least ~0.6s (even a snappy
+    /// local switch never just flashes; a slow remote naturally holds longer).
     @MainActor
     func switchConnection(_ id: String?) async {
-        guard id != activeConnectionId else { return }
+        guard id != activeConnectionId, switchPhase == nil else { return }
+        // Display name for the target (custom name, else host, else "local").
+        let target = id.flatMap { cid -> String? in
+            connections.first { $0.id == cid }.map { $0.name.isEmpty ? $0.host : $0.name }
+        } ?? i18n.t("servers.local")
+        switchingToName = target
+        switchPhase = .connecting
+        // The wormhole always plays for at least ~0.7s so it never just flashes.
+        let minHold: _Concurrency.Task<Void, Never> = _Concurrency.Task {
+            try? await _Concurrency.Task.sleep(nanoseconds: 700_000_000)
+        }
         do {
             try await api.setActiveConnection(id: id)
         } catch {
-            capture(error)
+            // Failure: let the wormhole play, then collapse it + show the message.
+            await minHold.value
+            switchPhase = .failed
             return
         }
         activeConnectionId = id
@@ -304,6 +327,15 @@ final class AppStore: ObservableObject {
         dashboard = nil
         await reloadOverview()
         await loadConnections()
+        await minHold.value
+        switchPhase = nil
+        switchingToName = nil
+    }
+
+    @MainActor
+    func dismissSwitch() {
+        switchPhase = nil
+        switchingToName = nil
     }
 
     @MainActor

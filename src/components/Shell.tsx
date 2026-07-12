@@ -60,7 +60,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto bg-canvas-subtle">
+        <main id="fs-content" className="min-h-0 flex-1 overflow-y-auto bg-canvas-subtle">
           {children}
         </main>
         {narrow && <MobileTabBar />}

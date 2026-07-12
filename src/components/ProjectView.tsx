@@ -29,6 +29,7 @@ import { Icon } from "./icons";
 import { NewTaskForm } from "./forms";
 import { DeleteButton } from "./DeleteButton";
 import { TaskPanel } from "./TaskPanel";
+import { useFirstVisit } from "@/lib/route-visit";
 import { useT } from "@/i18n/provider";
 
 // The single-project dashboard page: milestone cards + a status board. The
@@ -49,6 +50,7 @@ export function ProjectView({
   initialTaskId?: string;
 }) {
   const t = useT();
+  const reveal = useFirstVisit();
   const [selectedId, setSelectedId] = useState<string | null>(
     initialTaskId ?? null,
   );
@@ -113,7 +115,7 @@ export function ProjectView({
   // milestone cards + status board
   return (
     <>
-      <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
+      <div className={`${reveal} mx-auto max-w-6xl space-y-6 px-6 py-6`}>
         {header}
 
         {/* milestones */}

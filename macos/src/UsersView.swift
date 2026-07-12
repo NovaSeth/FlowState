@@ -82,7 +82,6 @@ struct UsersView: View {
 
     private func keyPane(_ key: ApiKey) -> some View {
         KeyPaneView(apiKey: key, grantLabels: grantLabels(key),
-                    mintedCount: store.apiKeys.filter { $0.createdByKeyId == key.id }.count,
                     activity: store.keyActivity, actors: store.actors)
             .frame(width: 384)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -193,7 +192,6 @@ private struct KeyPaneView: View {
     let apiKey: ApiKey
     /// Human summaries of the key's grants (one entry per grant).
     let grantLabels: [String]
-    let mintedCount: Int
     let activity: [Activity]
     let actors: [Actor]
     @State private var tab = "details"
@@ -246,7 +244,6 @@ private struct KeyPaneView: View {
             (i18n.t("users.keyLastUsed"), apiKey.lastUsedAt.map { formatTimestamp($0) } ?? i18n.t("users.neverUsed")),
             (i18n.t("users.keyCreatedAt"), formatTimestamp(apiKey.createdAt)),
             (i18n.t("users.keyRevoked"), apiKey.revokedAt.map { formatTimestamp($0) } ?? "-"),
-            (i18n.t("users.keyMinted"), "\(mintedCount)"),
         ]
         return VStack(spacing: 8) {
             detailRow(rows[0].0, rows[0].1)

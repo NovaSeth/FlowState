@@ -152,6 +152,9 @@ export const api = {
   /** Switch the data source (null = back to local). Health-checked server-side. */
   setActiveConnection: (activeId: string | null) =>
     req<{ activeId: string | null }>("/api/connections", patch({ activeId })),
+  /** Reachability of saved remote connections ({id: up?}) for the status dot. */
+  getConnectionsHealth: () =>
+    req<Record<string, boolean>>("/api/connections/health"),
   getAppSettings: () => req<AppSettingsPayload>("/api/settings"),
   setRequireKey: (requireKey: boolean) =>
     req<AppSettingsPayload>("/api/settings", patch({ requireKey })),

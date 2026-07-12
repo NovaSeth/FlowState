@@ -198,11 +198,14 @@
     "add": "Dodaj serwer",
     "remove": "Usun serwer",
     "namePlaceholder": "Nazwa (np. Mac w studio)",
+    "nameOptionalPlaceholder": "Nazwa (opcjonalnie)",
     "hostPlaceholder": "Host / IP",
     "keyPlaceholder": "Klucz API (fsk_...)",
     "addHint": "Inna instancja Flow State: host, port i klucz API z tamtego serwera.",
     "switchError": "Nie udalo sie przelaczyc zrodla danych",
-    "addError": "Nie udalo sie dodac serwera"
+    "addError": "Nie udalo sie dodac serwera",
+    "switching": "Przelaczam na",
+    "connectFailed": "Nie mozna polaczyc z serwerem"
   },
   "settings": {
     "eyebrow": "Ustawienia",

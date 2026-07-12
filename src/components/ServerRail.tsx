@@ -1,11 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import { Connection } from "@/lib/types";
 import { Icon } from "./icons";
+import { BrandMark } from "./BrandMark";
 import { errMessage } from "@/lib/format";
 import { useT } from "@/i18n/provider";
+
+// three.js water-wormhole effect - only loaded while a switch is in flight.
+const SwitchFX = dynamic(() => import("./SwitchFX"), { ssr: false });
 
 /* The connections rail: a slim WHITE strip on the far left (the visual inverse
    of the blue nav rail - white background, blue active element) listing the
@@ -22,6 +27,24 @@ export function ServerRail() {
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Full-screen switch transition: the source name being connected to + phase.
+  const [switchTarget, setSwitchTarget] = useState<string>("");
+  const [switchPhase, setSwitchPhase] = useState<
+    null | "connecting" | "arriving" | "failed"
+  >(null);
+  // Reachability per remote connection ({id: up?}) for the status dot.
+  const [health, setHealth] = useState<Record<string, boolean>>({});
+  // Vortex direction seed - bumped on every (re)target so the wormhole visibly
+  // changes course when you click a different server mid-switch.
+  const [switchSeed, setSwitchSeed] = useState(0);
+  // The content area's screen box, captured when a switch starts, so the
+  // wormhole covers ONLY the content - both blue rails stay fully intact.
+  const [contentBox, setContentBox] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  // Invalidates a still-running switch when it is re-targeted (last click wins).
+  const switchToken = useRef(0);
 
   const load = () =>
     api
@@ -31,23 +54,68 @@ export function ServerRail() {
         setActiveId(p.activeId);
       })
       .catch(() => {});
+  const loadHealth = () =>
+    api
+      .getConnectionsHealth()
+      .then(setHealth)
+      .catch(() => {});
   useEffect(() => {
     load();
+    loadHealth();
+    // Re-check reachability periodically so a dot flips when a server goes
+    // up/down without a manual refresh.
+    const timer = setInterval(loadHealth, 15000);
+    return () => clearInterval(timer);
   }, []);
 
-  async function activate(id: string | null) {
-    if (busy || id === activeId) return;
+  async function activate(id: string | null, label: string) {
+    // Idle click on the already-active source is a no-op; but during a switch a
+    // click on a DIFFERENT server re-targets the wormhole (change of mind).
+    if (id === activeId && switchPhase === null) return;
+    const token = ++switchToken.current;
     setBusy(true);
     setError(null);
+    // Cover only the content area (both blue rails stay visible + clickable).
+    const main = document.getElementById("fs-content");
+    if (main) {
+      const r = main.getBoundingClientRect();
+      setContentBox({ left: r.left, top: r.top });
+    }
+    setSwitchTarget(label);
+    // New random direction each (re)target so the vortex turns toward the new one.
+    setSwitchSeed((s) => s + Math.PI * (0.6 + Math.random() * 1.4));
+    setSwitchPhase("connecting");
+    // The wormhole always plays for at least 2s (even a snappy local switch or
+    // an instant refusal), then transitions smoothly into arrival or collapse.
+    const minHold = new Promise((r) => setTimeout(r, 2000));
     try {
-      await api.setActiveConnection(id);
-      // Full reload: SSR pages, the SSE stream and every client cache must
-      // re-read from the new source - a clean restart beats partial refetches.
+      await Promise.all([api.setActiveConnection(id), minHold]);
+      if (switchToken.current !== token) return; // re-targeted - abandon this one
+      // Arrival: fly through the wormhole (~550ms), then reload so the SSR
+      // pages + SSE stream re-read from the new source. The flag makes the fresh
+      // interface zoom in and settle (as if it rushed toward us out of the
+      // wormhole) - read + cleared once on the next load.
+      setSwitchPhase("arriving");
+      try {
+        sessionStorage.setItem("fs.justSwitched", "1");
+      } catch {
+        /* storage unavailable - the reload just skips the zoom-in */
+      }
+      await new Promise((r) => setTimeout(r, 550));
+      if (switchToken.current !== token) return;
       window.location.reload();
-    } catch (e) {
-      setError(errMessage(e, t("servers.switchError")));
+    } catch {
+      await minHold;
+      if (switchToken.current !== token) return; // a newer switch owns the overlay
+      // Failure: collapse the wormhole and show the message in place (no reload).
+      setSwitchPhase("failed");
       setBusy(false);
     }
+  }
+
+  function dismissSwitch() {
+    setSwitchPhase(null);
+    setBusy(false);
   }
 
   async function remove(id: string) {
@@ -65,39 +133,75 @@ export function ServerRail() {
     }
   }
 
+  // The rail width tracks the IP/host lengths (in ch): entries showing a host
+  // set the baseline; a longer custom NAME is capped to it and fades out.
+  const ipWidth = Math.max(
+    9,
+    "local".length,
+    ...connections.map((c) => c.host.length),
+  );
+
   return (
     <nav
       aria-label={t("servers.rail")}
-      className="relative flex w-16 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r-2 border-white bg-brand pb-3 pt-2"
+      // w-fit: the rail hugs its widest chip, so it grows to fit the longest
+      // host/IP (+ its status dot) and stays compact for short lists. The switch
+      // overlay covers only the content area, so the rail stays visible and
+      // clickable (re-target a switch by clicking another server).
+      className="relative flex w-fit min-w-[4.5rem] shrink-0 flex-col bg-brand"
     >
-      {/* Plain text list (no icons): "local" on top, then the saved hosts. */}
-      <RailEntry
-        label={t("servers.local")}
-        text="local"
-        active={activeId === null}
-        onClick={() => activate(null)}
-      />
-
-      {connections.map((c) => (
+      {/* Scrollable list; the divider below sits on the non-scrolling nav. */}
+      <div className="flex flex-1 flex-col items-stretch gap-1.5 overflow-y-auto px-2.5 pb-3 pt-2.5">
+        {/* "local" on top, then the saved hosts - a workspace-switcher list
+            (Discord/Slack style: rounded chips, host + reachability dot). */}
         <RailEntry
-          key={c.id}
-          label={`${c.name} - ${c.host}:${c.port}`}
-          text={c.host}
-          active={c.id === activeId}
-          onClick={() => activate(c.id)}
-          onRemove={() => remove(c.id)}
-          removeLabel={t("servers.remove")}
+          label={t("servers.local")}
+          text="local"
+          width={ipWidth}
+          active={activeId === null}
+          status="up"
+          onClick={() => activate(null, t("servers.local"))}
         />
-      ))}
 
-      <button
-        onClick={() => setAdding(true)}
-        aria-label={t("servers.add")}
-        title={t("servers.add")}
-        className="mt-1 w-14 rounded-md py-1.5 text-center font-mono text-sm leading-none text-white/70 transition-colors hover:bg-white/15 hover:text-white"
-      >
-        +
-      </button>
+        {connections.length > 0 && (
+          <span
+            aria-hidden="true"
+            className="mx-auto my-0.5 h-px w-8 rounded bg-white/20"
+          />
+        )}
+
+        {connections.map((c) => (
+          <RailEntry
+            key={c.id}
+            label={
+              c.name ? `${c.name} - ${c.host}:${c.port}` : `${c.host}:${c.port}`
+            }
+            // Show the custom name if given, else the host/IP.
+            text={c.name || c.host}
+            width={ipWidth}
+            active={c.id === activeId}
+            status={c.id in health ? (health[c.id] ? "up" : "down") : null}
+            onClick={() => activate(c.id, c.name || c.host)}
+            onRemove={() => remove(c.id)}
+            removeLabel={t("servers.remove")}
+          />
+        ))}
+
+        <button
+          onClick={() => setAdding(true)}
+          aria-label={t("servers.add")}
+          title={t("servers.add")}
+          className="mt-0.5 flex items-center justify-center rounded-2xl border border-dashed border-white/30 py-2 font-mono text-base leading-none text-white/60 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white"
+        >
+          +
+        </button>
+      </div>
+
+      {/* Delicate divider between the two rails, inset 10px top and bottom. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-[10px] right-0 w-px bg-white/40"
+      />
 
       {adding && (
         <AddConnectionDialog
@@ -127,6 +231,15 @@ export function ServerRail() {
           {error}
         </p>
       )}
+      {switchPhase !== null && (
+        <ServerSwitchOverlay
+          target={switchTarget}
+          phase={switchPhase}
+          seed={switchSeed}
+          box={contentBox}
+          onDismiss={dismissSwitch}
+        />
+      )}
     </nav>
   );
 }
@@ -134,40 +247,66 @@ export function ServerRail() {
 function RailEntry({
   label,
   text,
+  width,
   active,
+  status,
   onClick,
   onRemove,
   removeLabel,
 }: {
   label: string;
-  /** What the entry shows: "local" or the server's host/IP. */
+  /** What the entry shows: the custom name if given, else the host/IP. */
   text: string;
+  /** Baseline width in ch (from the IPs); a longer name is capped + faded. */
+  width: number;
   active: boolean;
+  /** Reachability: "up" = green dot, "down" = red dot, null = still checking. */
+  status?: "up" | "down" | null;
   onClick: () => void;
   onRemove?: () => void;
   removeLabel?: string;
 }) {
+  // A name longer than the IP baseline is clipped to it with a trailing fade,
+  // then the dot; anything that fits shows in full (no fade, dot right after).
+  const faded = text.length > width;
   return (
-    <span className="group relative flex w-14 flex-col items-center">
+    <span className="group relative flex w-full items-center justify-center">
       <button
         onClick={onClick}
         aria-label={label}
         aria-pressed={active}
         title={label}
-        className={`w-14 break-all rounded-md px-1 py-1.5 text-center font-mono text-[9px] leading-tight transition-colors ${
+        className={`flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl px-3 py-2 font-mono text-[10px] leading-none transition-all duration-200 ${
           active
-            ? "bg-white text-brand"
-            : "text-white/80 hover:bg-white/15 hover:text-white"
+            ? "bg-white text-brand shadow-sm"
+            : "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
         }`}
       >
-        {text}
+        <span
+          className={
+            faded
+              ? "block overflow-hidden text-left [mask-image:linear-gradient(to_right,#000_0,#000_calc(100%-14px),transparent)]"
+              : "block"
+          }
+          style={faded ? { maxWidth: `${width}ch` } : undefined}
+        >
+          {text}
+        </span>
+        {/* Reachability dot, to the right of the host / name. */}
+        {status && (
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              status === "up" ? "bg-emerald-400" : "bg-red-400"
+            }`}
+          />
+        )}
       </button>
       {onRemove && (
         <button
           onClick={onRemove}
           aria-label={removeLabel}
           title={removeLabel}
-          className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-white/30 text-white hover:bg-danger hover:text-white group-hover:flex"
+          className="absolute -right-0.5 -top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-white text-brand shadow hover:bg-danger hover:text-white group-hover:flex"
         >
           <Icon name="close" size={10} />
         </button>
@@ -201,7 +340,8 @@ function AddConnectionDialog({
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !host.trim() || !Number(port)) return;
+    // Name is optional (the rail falls back to the host/IP); host + port required.
+    if (!host.trim() || !Number(port)) return;
     onSubmit({
       name: name.trim(),
       host: host.trim(),
@@ -227,15 +367,15 @@ function AddConnectionDialog({
       >
         <h2 className="text-sm font-semibold text-fg">{t("servers.add")}</h2>
         <input
-          autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={t("servers.namePlaceholder")}
+          placeholder={t("servers.nameOptionalPlaceholder")}
           className={inputCls}
         />
         <div className="flex gap-2">
           <input
             value={host}
+            autoFocus
             onChange={(e) => setHost(e.target.value)}
             placeholder={t("servers.hostPlaceholder")}
             className={inputCls}
@@ -265,13 +405,105 @@ function AddConnectionDialog({
           </button>
           <button
             type="submit"
-            disabled={busy || !name.trim() || !host.trim()}
+            disabled={busy || !host.trim() || !Number(port)}
             className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
             {t("forms.add")}
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/** The data-source switch transition. It covers ONLY the content area (`box`) so
+ *  both blue rails stay fully visible - and the server rail stays clickable, so
+ *  you can re-target the wormhole to a different server mid-switch. An
+ *  Interstellar-style hyperspace tunnel plays with the connection status in the
+ *  centre; on arrival it flies through into the new screens, on failure it
+ *  collapses to a plain "could not reach" message with a Back button. */
+function ServerSwitchOverlay({
+  target,
+  phase,
+  seed,
+  box,
+  onDismiss,
+}: {
+  target: string;
+  phase: "connecting" | "arriving" | "failed";
+  /** Vortex direction seed (changes on re-target). */
+  seed: number;
+  /** Content-area box; the overlay covers exactly this (rails stay visible). */
+  box: { left: number; top: number } | null;
+  onDismiss: () => void;
+}) {
+  const t = useT();
+  const failed = phase === "failed";
+  return (
+    <div
+      style={{ left: box?.left ?? 0, top: box?.top ?? 0 }}
+      className="fixed bottom-0 right-0 z-[100] flex flex-col items-center justify-center gap-5 overflow-hidden bg-canvas [animation:fs-switch-fade_250ms_ease-out]"
+    >
+      {/* Interstellar hyperspace tunnel: radial light streaks, a warm accretion
+          mouth, violet/blue dispersion; grows from small to fill the content. */}
+      <SwitchFX collapsing={failed} arriving={phase === "arriving"} seed={seed} />
+
+      {failed ? (
+        <div className="relative flex flex-col items-center gap-4 [animation:fs-switch-fade_400ms_ease-out]">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-danger-muted text-danger">
+            <Icon name="alert" size={24} />
+          </span>
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-sm font-medium text-fg">
+              {t("servers.connectFailed")}
+            </span>
+            <span className="font-mono text-xs text-fg-subtle">{target}</span>
+          </div>
+          <button
+            onClick={onDismiss}
+            className="rounded-md border border-edge bg-canvas-subtle px-4 py-1.5 text-sm text-fg transition-colors hover:bg-neutral-muted"
+          >
+            {t("common.back")}
+          </button>
+        </div>
+      ) : (
+        // The centre content fades out on arrival as we fly through the wormhole.
+        <div
+          className={`flex flex-col items-center gap-5 transition-opacity duration-500 ${
+            phase === "arriving" ? "opacity-0" : "opacity-100"
+          }`}
+        >
+          <span className="relative text-accent [animation:fs-switch-breathe_1.2s_ease-in-out_infinite]">
+            <BrandMark size={52} />
+          </span>
+          <div className="relative flex flex-col items-center gap-1">
+            <span className="text-sm font-medium text-fg">
+              {t("servers.switching")}
+            </span>
+            <span className="font-mono text-xs text-accent">{target}</span>
+          </div>
+          <span className="relative flex gap-1.5">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="h-2 w-2 rounded-full bg-accent [animation:fs-switch-dot_1s_ease-in-out_infinite]"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </span>
+        </div>
+      )}
+      <style>{`
+        @keyframes fs-switch-fade { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes fs-switch-breathe {
+          0%, 100% { transform: scale(1); opacity: 0.8 }
+          50% { transform: scale(1.1); opacity: 1 }
+        }
+        @keyframes fs-switch-dot {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4 }
+          40% { transform: translateY(-5px); opacity: 1 }
+        }
+      `}</style>
     </div>
   );
 }

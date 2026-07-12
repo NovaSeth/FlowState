@@ -97,6 +97,11 @@ public struct FlowStateAPI: Sendable {
         try await get("/api/settings")
     }
 
+    /// Reachability of each saved remote connection ({id: up?}) for the rail dot.
+    public func connectionsHealth() async throws -> [String: Bool] {
+        try await get("/api/connections/health")
+    }
+
     @discardableResult
     public func setRequireKey(_ on: Bool) async throws -> AppSettingsPayload {
         try await send("PATCH", "/api/settings", body: ["requireKey": on])

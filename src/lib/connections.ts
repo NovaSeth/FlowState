@@ -69,14 +69,14 @@ export function createConnection(input: {
   port?: unknown;
   apiKey?: unknown;
 }): Connection {
-  const name =
-    typeof input.name === "string" && input.name.trim() ? input.name.trim() : null;
+  // The name is OPTIONAL - when omitted the rail shows the host/IP instead.
+  const name = typeof input.name === "string" ? input.name.trim() : "";
   const host =
     typeof input.host === "string" && input.host.trim() ? input.host.trim() : null;
   const port = Number(input.port);
   const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
-  if (!name || !host || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new AppError(422, "Connection requires a name, host and a valid port");
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new AppError(422, "Connection requires a host and a valid port");
   }
   const id = "cn_" + randomBytes(9).toString("base64url");
   getDb()
@@ -141,6 +141,29 @@ export async function setActiveConnection(id: string | null): Promise<void> {
     );
   }
   putSetting(ACTIVE_KEY, id);
+}
+
+/** Reachability of every saved connection (`id -> up?`), each pinged in
+ *  parallel with a short timeout. Local is not listed (it is always this
+ *  server). Used for the status dot on the connections rail. */
+export async function connectionsHealth(): Promise<Record<string, boolean>> {
+  const rows = getDb()
+    .prepare(`SELECT id, host, port, apiKey FROM connections`)
+    .all() as unknown as ConnectionWithKey[];
+  const entries = await Promise.all(
+    rows.map(async (r) => {
+      try {
+        const res = await fetch(`http://${r.host}:${r.port}/api/dashboard`, {
+          headers: r.apiKey ? { "x-api-key": r.apiKey } : undefined,
+          signal: AbortSignal.timeout(2500),
+        });
+        return [r.id, res.ok] as const;
+      } catch {
+        return [r.id, false] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
 export function requireKeyEnabled(): boolean {

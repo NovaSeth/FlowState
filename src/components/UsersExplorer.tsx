@@ -75,8 +75,6 @@ export function UsersExplorer({
 
   const [error, setError] = useState<string | null>(null);
   const [justCreated, setJustCreated] = useState<ApiKeyWithSecret | null>(null);
-  // Which parent actors have their sub-APIs expanded (collapsed by default).
-  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
 
   const loadActors = async () => setActors(await api.listActors());
   const loadKeys = async () => setKeys(await api.listApiKeys());
@@ -191,63 +189,10 @@ export function UsersExplorer({
     }
   }
 
-  // Parent actor of a delegated actor: actor.createdByKeyId -> key -> its actorId.
-  // (Sub-API = an actor minted with another actor's key.)
-  const parentActorIdOf = (a: Actor): string | null => {
-    if (!a.createdByKeyId) return null;
-    const k = keys.find((kk) => kk.id === a.createdByKeyId);
-    return k && k.actorId !== a.id ? k.actorId : null;
-  };
-  const childrenByParent = new Map<string, Actor[]>();
-  for (const a of actors) {
-    const p = parentActorIdOf(a);
-    if (p && actors.some((x) => x.id === p)) {
-      const arr = childrenByParent.get(p) ?? [];
-      arr.push(a);
-      childrenByParent.set(p, arr);
-    }
-  }
-  // Roots: actors without a (known) parent - sub-APIs collapse underneath them.
-  const rootActors = actors.filter((a) => {
-    const p = parentActorIdOf(a);
-    return !p || !actors.some((x) => x.id === p);
-  });
-  const toggleSub = (id: string) =>
-    setExpandedSubs((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const renderActorNode = (a: Actor): React.ReactNode => {
-    const kids = childrenByParent.get(a.id) ?? [];
-    const open = expandedSubs.has(a.id);
-    return (
-      <div key={a.id}>
-        <ActorRow
-          narrow={narrow}
-          active={a.id === actorId}
-          dimmed={!!a.archivedAt}
-          actor={a}
-          keyCount={keyCountOf(a.id)}
-          childCount={kids.length}
-          expanded={open}
-          onToggle={() => toggleSub(a.id)}
-          onSelect={() => selectActor(a.id)}
-        />
-        {open && kids.length > 0 && (
-          // Guide line connecting the sub-API to its parent (readable hierarchy).
-          <div className="ml-[1.55rem] border-l border-edge">
-            {kids.map((c) => renderActorNode(c))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   // --- column content (shared between desktop and mobile) ---
 
+  // Flat list: one key = one user. Every actor is a top-level row - there is no
+  // sub-key / delegation hierarchy in the model any more.
   const actorsCol = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto pb-2">
@@ -255,9 +200,19 @@ export function UsersExplorer({
           <ColHint text={t("users.noActors")} />
         ) : (
           withArchivedDivider(
-            rootActors,
+            actors,
             (a) => !!a.archivedAt,
-            (a) => renderActorNode(a),
+            (a) => (
+              <ActorRow
+                key={a.id}
+                narrow={narrow}
+                active={a.id === actorId}
+                dimmed={!!a.archivedAt}
+                actor={a}
+                keyCount={keyCountOf(a.id)}
+                onSelect={() => selectActor(a.id)}
+              />
+            ),
           )
         )}
       </div>
@@ -323,11 +278,6 @@ export function UsersExplorer({
         <KeyDetails
           apiKey={selectedKey}
           grantLabels={selectedKey ? selectedKey.grants.map(grantLabel) : []}
-          mintedCount={
-            selectedKey
-              ? keys.filter((k) => k.createdByKeyId === selectedKey.id).length
-              : 0
-          }
         />
       ) : (
         <ActivityFeed
@@ -437,9 +387,6 @@ function ActorRow({
   dimmed,
   actor,
   keyCount,
-  childCount = 0,
-  expanded = false,
-  onToggle,
   onSelect,
 }: {
   narrow?: boolean;
@@ -447,13 +394,9 @@ function ActorRow({
   dimmed?: boolean;
   actor: Actor;
   keyCount: number;
-  childCount?: number;
-  expanded?: boolean;
-  onToggle?: () => void;
   onSelect: () => void;
 }) {
   const t = useT();
-  const hasKids = childCount > 0;
   return (
     <div
       className={`group relative ${dimmed ? "opacity-50 transition-opacity hover:opacity-100" : ""}`}
@@ -465,37 +408,8 @@ function ActorRow({
         } ${active ? "bg-accent-muted" : narrow ? "" : "hover:bg-canvas-subtle"}`}
       >
         <div className="flex w-full items-center gap-2">
-          {hasKids ? (
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={t("users.toggleSubAgents")}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggle?.();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onToggle?.();
-                }
-              }}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-fg-subtle hover:bg-neutral-muted hover:text-fg"
-            >
-              <Icon
-                name="chevron"
-                size={15}
-                className={`transition-transform ${expanded ? "rotate-90" : ""}`}
-              />
-            </span>
-          ) : (
-            <span className="h-5 w-5 shrink-0" />
-          )}
           <span
-            className={`min-w-0 flex-1 truncate text-fg ${narrow ? "text-[15px]" : "text-sm"} ${
-              hasKids ? "font-medium" : ""
-            }`}
+            className={`min-w-0 flex-1 truncate text-fg ${narrow ? "text-[15px]" : "text-sm"}`}
           >
             {actor.name}
           </span>
@@ -504,17 +418,11 @@ function ActorRow({
           )}
         </div>
         {/* The agent/human tag sits UNDER the name, next to the key count. */}
-        <div className="flex items-center gap-1.5 pl-7 text-[11px] text-fg-subtle">
+        <div className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
           <KindBadge kind={actor.kind} />
           <span className="font-mono tabular-nums">
             {t("users.keyCount", { n: keyCount })}
           </span>
-          {hasKids && (
-            <>
-              <span aria-hidden>&middot;</span>
-              <span className="text-accent">{t("users.subAgents", { n: childCount })}</span>
-            </>
-          )}
           {actor.archivedAt && (
             <>
               <span aria-hidden>&middot;</span>
@@ -602,12 +510,10 @@ function KeyRow({
 function KeyDetails({
   apiKey,
   grantLabels,
-  mintedCount,
 }: {
   apiKey: ApiKey | null;
   /** Human summaries of the key's grants (one entry per grant). */
   grantLabels: string[];
-  mintedCount: number;
 }) {
   const t = useT();
   // undefined = hidden (show button), null = unavailable (legacy key),
@@ -684,7 +590,6 @@ function KeyDetails({
         "-"
       ),
     },
-    { label: t("users.keyMinted"), value: String(mintedCount) },
   ];
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-3">

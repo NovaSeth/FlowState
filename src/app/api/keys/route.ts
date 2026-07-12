@@ -16,9 +16,11 @@ export const GET = route(async (req) => {
 });
 
 /**
- * POST /api/keys - creates a key. The response contains the full `token` - shown
- * ONCE (only the hash is stored in the DB). When called with a valid x-api-key it
- * records the delegation (createdByKeyId), so an agent can mint keys for sub-agents.
+ * POST /api/keys - creates a key for one actor. The response contains the full
+ * `token` - shown ONCE (only the hash is stored in the DB). One key = one user;
+ * there is no sub-key hierarchy. A non-admin caller may not grant access it does
+ * not itself hold (privilege containment); its keyId is stamped as an audit
+ * breadcrumb (createdByKeyId) but confers no special rights.
  */
 export const POST = route(async (req) => {
   const body = (await readJson(req)) as CreateApiKeyInput;

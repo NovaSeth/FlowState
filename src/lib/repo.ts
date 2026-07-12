@@ -1876,8 +1876,8 @@ export class Repo {
     });
   }
 
-  /** True when the parent grant covers the child grant (delegation cannot widen:
-   *  neither the target nor the rights). */
+  /** True when grant `parent` covers grant `child` (privilege containment: a
+   *  key cannot grant a broader target or wider rights than it holds). */
   private grantCoversGrant(parent: KeyGrant, child: KeyGrant): boolean {
     if (parent.scope === "read" && child.scope === "write") return false;
     if (Repo.isGlobalGrant(parent)) return true;
@@ -1892,9 +1892,12 @@ export class Repo {
   }
 
   /**
-   * Creates an API key. Provide `actorId` (existing) OR `actorName` (creates a
-   * new agent). The secret is hashed; the full token is returned ONCE. When
-   * called within a key context (delegation), records createdByKeyId.
+   * Creates an API key for exactly one actor: provide `actorId` (existing) OR
+   * `actorName` (creates a new agent user). The secret is hashed; the full
+   * token is returned ONCE. There is no sub-key hierarchy - every key stands on
+   * its own. `createdByKeyId` is still stamped as an AUDIT breadcrumb (which key
+   * provisioned this one) but carries no special rights; and as a safety rail a
+   * non-admin key may not grant access broader or longer-lived than it holds.
    */
   createApiKey(input: CreateApiKeyInput): ApiKeyWithSecret {
     let actorId = optionalString(input.actorId, "actorId");
@@ -1920,8 +1923,8 @@ export class Repo {
 
     let expiresAt: string | null = optionalString(input.expiresAt, "expiresAt") ?? null;
     if (expiresAt) {
-      // Normalize to canonical ISO so the lexicographic expiry/delegation
-      // comparisons (expiresAt <= now, child > parent) are sound. Reject garbage.
+      // Normalize to canonical ISO so the lexicographic expiry comparisons
+      // (expiresAt <= now, new <= caller) are sound. Reject garbage.
       const d = new Date(expiresAt);
       if (isNaN(d.getTime())) throw unprocessable(`Field "expiresAt" must be a valid date`);
       expiresAt = d.toISOString();
@@ -1930,24 +1933,26 @@ export class Repo {
       expiresAt = new Date(Date.now() + input.ttlSeconds * 1000).toISOString();
     }
 
-    // Delegation cannot widen permissions: every grant of a child key minted by
-    // a parent key must be covered by one of the parent's grants (target and
-    // rights), and the child's lifetime cannot exceed the parent's.
+    // Privilege containment (a safety rail, not delegation): a non-admin key
+    // cannot provision a key with access it does not itself hold - every grant
+    // must be covered by one of the caller's grants, and the new key's lifetime
+    // cannot exceed the caller's. Admin (FS_API_KEY) and the local operator are
+    // unrestricted.
     const callerKeyId = currentContext().keyId;
     if (callerKeyId) {
-      const parent = this.getApiKey(callerKeyId);
-      if (parent) {
-        for (const child of grants) {
-          if (!parent.grants.some((pg) => this.grantCoversGrant(pg, child))) {
+      const caller = this.getApiKey(callerKeyId);
+      if (caller) {
+        for (const grant of grants) {
+          if (!caller.grants.some((cg) => this.grantCoversGrant(cg, grant))) {
             throw new AppError(
               403,
-              "A delegated key cannot exceed the parent key's grants",
+              "A key cannot grant access it does not itself hold",
             );
           }
         }
-        // the child's lifetime does not exceed the parent's (hard clamp)
-        if (parent.expiresAt && (!expiresAt || expiresAt > parent.expiresAt)) {
-          expiresAt = parent.expiresAt;
+        // the new key's lifetime does not exceed the caller's (hard clamp)
+        if (caller.expiresAt && (!expiresAt || expiresAt > caller.expiresAt)) {
+          expiresAt = caller.expiresAt;
         }
       }
     }
@@ -1998,7 +2003,8 @@ export class Repo {
    * Full token for the Users panel's "show" reveal - null for keys created
    * before the plaintext-secret column (unrecoverable from the hash). Same
    * authorization circle as revokeApiKey: admin, the anonymous local operator
-   * (open mode), the key itself, its delegation parent, or the owning actor.
+   * (open mode), the key itself, or the owning actor. (One key = one user; there
+   * is no delegation "parent" with special rights any more.)
    */
   apiKeyToken(id: string): string | null {
     const existing = this.getApiKey(id);
@@ -2008,7 +2014,6 @@ export class Repo {
       ctx.admin === true ||
       (!ctx.keyId && !ctx.actorId) ||
       ctx.keyId === existing.id ||
-      (!!existing.createdByKeyId && existing.createdByKeyId === ctx.keyId) ||
       (!!existing.actorId && existing.actorId === ctx.actorId);
     if (!authorized) {
       throw new AppError(403, "Not authorized to read this key's token");
@@ -2058,14 +2063,14 @@ export class Repo {
     const existing = this.getApiKey(id);
     if (!existing) throw notFound("apiKey");
     // Authorization: admin, anonymous local operator (open mode; in strict mode
-    // route() already filters out keyless), the key itself, the delegation parent,
-    // or the owner (the same actor). Otherwise 403.
+    // route() already filters out keyless), the key itself, or the owner (the
+    // same actor). One key = one user - there is no delegation "parent" with
+    // special rights any more. Otherwise 403.
     const ctx = currentContext();
     const authorized =
       ctx.admin === true ||
       (!ctx.keyId && !ctx.actorId) ||
       ctx.keyId === existing.id ||
-      (!!existing.createdByKeyId && existing.createdByKeyId === ctx.keyId) ||
       (!!existing.actorId && existing.actorId === ctx.actorId);
     if (!authorized) {
       throw new AppError(403, "Not authorized to revoke this key");
