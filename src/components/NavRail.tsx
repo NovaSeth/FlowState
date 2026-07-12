@@ -10,7 +10,7 @@ import { useT } from "@/i18n/provider";
 // features it lands), MAJOR jumps when we turn the concept upside down
 // (-> 2.00). Bump it on every commit that touches the UI.
 // Shared with the native macOS app (CFBundleShortVersionString in macos/build.sh).
-const UI_VERSION = "1.49";
+const UI_VERSION = "1.51";
 
 // Main menu (sidebar). Order from the top: Overview, Explorer, Users; Settings
 // is pinned to the bottom of the rail, right above the version marker.

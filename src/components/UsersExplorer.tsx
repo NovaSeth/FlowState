@@ -492,7 +492,6 @@ function ActorRow({
           ) : (
             <span className="h-5 w-5 shrink-0" />
           )}
-          <KindBadge kind={actor.kind} />
           <span
             className={`min-w-0 flex-1 truncate text-fg ${narrow ? "text-[15px]" : "text-sm"} ${
               hasKids ? "font-medium" : ""
@@ -504,7 +503,9 @@ function ActorRow({
             <Icon name="chevron" size={18} className="-mr-1 shrink-0 text-fg-subtle" />
           )}
         </div>
+        {/* The agent/human tag sits UNDER the name, next to the key count. */}
         <div className="flex items-center gap-1.5 pl-7 text-[11px] text-fg-subtle">
+          <KindBadge kind={actor.kind} />
           <span className="font-mono tabular-nums">
             {t("users.keyCount", { n: keyCount })}
           </span>
@@ -609,12 +610,45 @@ function KeyDetails({
   mintedCount: number;
 }) {
   const t = useT();
+  // undefined = hidden (show button), null = unavailable (legacy key),
+  // string = revealed token. Reset during render when the selection changes
+  // (the React "derive state from props" pattern - no effect needed).
+  const [token, setToken] = useState<string | null | undefined>(undefined);
+  const [tokenKeyId, setTokenKeyId] = useState(apiKey?.id);
+  if (tokenKeyId !== apiKey?.id) {
+    setTokenKeyId(apiKey?.id);
+    setToken(undefined);
+  }
+
   if (!apiKey) return <ColHint text={t("users.pickKey")} />;
   const expired = isExpired(apiKey);
+  const reveal = () =>
+    api
+      .getKeySecret(apiKey.id)
+      .then((r) => setToken(r.token))
+      .catch(() => setToken(null));
   const rows: { label: string; value: ReactNode }[] = [
     {
       label: t("users.keyPrefix"),
       value: <code className="font-mono text-fg">{apiKey.prefix}</code>,
+    },
+    {
+      label: t("users.keyToken"),
+      value:
+        token === undefined ? (
+          <button onClick={reveal} className="text-accent hover:underline">
+            {t("users.showKey")}
+          </button>
+        ) : token === null ? (
+          <span className="text-fg-subtle">{t("users.keyTokenUnavailable")}</span>
+        ) : (
+          <code
+            title={token}
+            className="select-all font-mono text-xs text-fg"
+          >
+            {token}
+          </code>
+        ),
     },
     { label: t("users.permissions"), value: apiKey.scope },
     {

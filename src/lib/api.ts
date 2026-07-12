@@ -118,6 +118,9 @@ export const api = {
   createApiKey: (b: CreateApiKeyInput) =>
     req<ApiKeyWithSecret>("/api/keys", post(b)),
   revokeApiKey: (id: string) => req<ApiKey>(`/api/keys/${id}`, del),
+  /** Full token for the "show" reveal (null: key predates secret storage). */
+  getKeySecret: (id: string) =>
+    req<{ token: string | null }>(`/api/keys/${id}/secret`),
   listActivity: (
     filter: {
       solutionId?: string;

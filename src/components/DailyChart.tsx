@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DailyByStatus, TaskStatus } from "@/lib/types";
 import { STATUS_META } from "@/lib/labels";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
@@ -33,14 +33,16 @@ const STATUS_LINE_COLOR: Record<TaskStatus, string> = {
   closed: "var(--done)",
 };
 
-// viewBox geometry (logical units; the SVG scales to the container width).
-const VB_WIDTH = 720;
+// viewBox geometry. The viewBox WIDTH tracks the real container width (via a
+// ResizeObserver), so SVG units map 1:1 to pixels and text/markers render at
+// their true size - a fixed viewBox with preserveAspectRatio="none" stretched
+// the axis labels into an unreadable smear on wide windows.
+const VB_WIDTH = 720; // initial width before the first measure
 const VB_HEIGHT = 200;
 const PAD_LEFT = 28; // room for the Y max label
 const PAD_RIGHT = 8;
 const PAD_TOP = 10;
 const PAD_BOTTOM = 22; // room for the date label row
-const PLOT_W = VB_WIDTH - PAD_LEFT - PAD_RIGHT;
 const PLOT_H = VB_HEIGHT - PAD_TOP - PAD_BOTTOM;
 
 /** 'YYYY-MM-DD' -> short 'MM-DD' axis label (avoid clutter on long ranges). */
@@ -54,6 +56,21 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
   // Day under the cursor: drives the vertical guide + the per-status summary
   // tooltip (hovering anywhere in the plot snaps to the nearest day).
   const [hoverDi, setHoverDi] = useState<number | null>(null);
+
+  // Real container width -> viewBox width (1:1 px), so text never distorts.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [vbW, setVbW] = useState(VB_WIDTH);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setVbW(Math.max(320, Math.round(w)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const plotW = vbW - PAD_LEFT - PAD_RIGHT;
 
   const { days, statuses, counts } = data;
   const hasData =
@@ -74,7 +91,7 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
   // Map a day index to its X center, and a count to its Y. With a single day the
   // point sits in the middle; otherwise points spread evenly across the plot.
   const xFor = (di: number) =>
-    days.length === 1 ? PAD_LEFT + PLOT_W / 2 : PAD_LEFT + (di / (days.length - 1)) * PLOT_W;
+    days.length === 1 ? PAD_LEFT + plotW / 2 : PAD_LEFT + (di / (days.length - 1)) * plotW;
   const yFor = (value: number) => PAD_TOP + PLOT_H - (value / yMax) * PLOT_H;
 
   // A light gridline halfway up the plot when the scale is tall enough to warrant it.
@@ -94,31 +111,28 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
     return { id: status, name, stroke, points };
   });
 
-  // Snap the cursor to the nearest day: fraction of the SVG width -> viewBox X
-  // -> day index (the SVG stretches, so plain proportions are enough).
+  // Snap the cursor to the nearest day (viewBox units are real pixels now).
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width === 0) return;
-    const vbX = ((e.clientX - rect.left) / rect.width) * VB_WIDTH;
+    const vbX = e.clientX - rect.left;
     const di =
       days.length === 1
         ? 0
-        : Math.round(((vbX - PAD_LEFT) / PLOT_W) * (days.length - 1));
+        : Math.round(((vbX - PAD_LEFT) / plotW) * (days.length - 1));
     setHoverDi(Math.max(0, Math.min(days.length - 1, di)));
   }
 
-  const hoverLeftPct =
-    hoverDi === null ? 0 : (xFor(hoverDi) / VB_WIDTH) * 100;
   // Flip the tooltip to the other side of the guide near the right edge.
   const hoverFlip = hoverDi !== null && hoverDi > (days.length - 1) / 2;
 
   return (
-    <div className="relative rounded-lg border border-edge bg-canvas p-4 shadow-resting">
+    <div className="rounded-lg border border-edge bg-canvas p-4 shadow-resting">
+      <div ref={wrapRef} className="relative">
       <svg
-        viewBox={`0 0 ${VB_WIDTH} ${VB_HEIGHT}`}
-        preserveAspectRatio="none"
+        viewBox={`0 0 ${vbW} ${VB_HEIGHT}`}
         width="100%"
-        className="h-44 w-full"
+        style={{ height: VB_HEIGHT }}
         role="img"
         aria-label={`${t("overview.dailyChartTitle")}: ${statuses.length}, ${days.length}`}
         onMouseMove={onMove}
@@ -141,7 +155,7 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
             <line
               x1={PAD_LEFT}
               y1={yFor(midValue)}
-              x2={PAD_LEFT + PLOT_W}
+              x2={PAD_LEFT + plotW}
               y2={yFor(midValue)}
               className="stroke-edge-muted"
               strokeWidth={1}
@@ -162,7 +176,7 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
         <line
           x1={PAD_LEFT}
           y1={PAD_TOP + PLOT_H}
-          x2={PAD_LEFT + PLOT_W}
+          x2={PAD_LEFT + plotW}
           y2={PAD_TOP + PLOT_H}
           className="stroke-edge"
           strokeWidth={1}
@@ -225,9 +239,9 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
       {/* Day summary tooltip: date + every status' transition count that day. */}
       {hoverDi !== null && (
         <div
-          className="pointer-events-none absolute top-6 z-10"
+          className="pointer-events-none absolute top-4 z-10"
           style={{
-            left: `${hoverLeftPct}%`,
+            left: xFor(hoverDi),
             transform: hoverFlip ? "translateX(calc(-100% - 10px))" : "translateX(10px)",
           }}
         >
@@ -256,6 +270,7 @@ export function DailyChart({ data }: { data: DailyByStatus }) {
           </div>
         </div>
       )}
+      </div>
 
       {/* Legend below the plot: wrapping row of swatch + status label. */}
       <ul className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">

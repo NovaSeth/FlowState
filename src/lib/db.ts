@@ -233,6 +233,14 @@ function migrate(db: DatabaseSync): void {
     db.exec(`ALTER TABLE api_keys ADD COLUMN grants TEXT`);
   }
 
+  // Plaintext token secret for the "show key" reveal in the Users panel - an
+  // explicit product decision for this LOCAL single-user tool. Auth still
+  // verifies against secretHash only; this column merely reconstructs the
+  // token for display. Keys created before it stay NULL (unrecoverable).
+  if (!hasColumn(db, "api_keys", "secret")) {
+    db.exec(`ALTER TABLE api_keys ADD COLUMN secret TEXT`);
+  }
+
   // New tables (artifacts, soft links) - on an existing database SCHEMA creates
   // them via IF NOT EXISTS, but we create them explicitly in case of an older file.
   db.exec(`

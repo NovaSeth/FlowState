@@ -60,6 +60,14 @@ public struct FlowStateAPI: Sendable {
         return try await get("/api/keys", query: query)
     }
 
+    /// Full token for the Users panel's "show" reveal. nil when the key
+    /// predates plaintext-secret storage (unrecoverable from the hash).
+    public func keySecret(id: String) async throws -> String? {
+        struct Payload: Decodable { let token: String? }
+        let payload: Payload = try await get("/api/keys/\(id)/secret")
+        return payload.token
+    }
+
     public func activity(entityId: String? = nil, actorId: String? = nil, limit: Int? = nil) async throws -> [Activity] {
         var query: [String: String] = [:]
         if let entityId { query["entityId"] = entityId }

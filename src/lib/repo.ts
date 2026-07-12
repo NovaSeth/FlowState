@@ -1952,13 +1952,13 @@ export class Repo {
       }
     }
 
-    const { prefix, token, secretHash } = generateKey();
+    const { prefix, secret, token, secretHash } = generateKey();
     const id = genId(ID_PREFIX.apiKey);
     this.db
       .prepare(
         `INSERT INTO api_keys
-          (id, actorId, solutionId, name, prefix, secretHash, scope, grants, expiresAt, createdByKeyId, lastUsedAt, revokedAt, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, actorId, solutionId, name, prefix, secretHash, secret, scope, grants, expiresAt, createdByKeyId, lastUsedAt, revokedAt, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1967,6 +1967,7 @@ export class Repo {
         optionalString(input.name, "name") ?? "",
         prefix,
         secretHash,
+        secret,
         scope,
         JSON.stringify(grants),
         expiresAt,
@@ -1991,6 +1992,31 @@ export class Repo {
       .prepare(`SELECT ${API_KEY_PUBLIC_COLS} FROM api_keys WHERE id = ?`)
       .get(id);
     return row ? this.toPublicKey(plain(row)) : null;
+  }
+
+  /**
+   * Full token for the Users panel's "show" reveal - null for keys created
+   * before the plaintext-secret column (unrecoverable from the hash). Same
+   * authorization circle as revokeApiKey: admin, the anonymous local operator
+   * (open mode), the key itself, its delegation parent, or the owning actor.
+   */
+  apiKeyToken(id: string): string | null {
+    const existing = this.getApiKey(id);
+    if (!existing) throw notFound("apiKey");
+    const ctx = currentContext();
+    const authorized =
+      ctx.admin === true ||
+      (!ctx.keyId && !ctx.actorId) ||
+      ctx.keyId === existing.id ||
+      (!!existing.createdByKeyId && existing.createdByKeyId === ctx.keyId) ||
+      (!!existing.actorId && existing.actorId === ctx.actorId);
+    if (!authorized) {
+      throw new AppError(403, "Not authorized to read this key's token");
+    }
+    const row = plain(
+      this.db.prepare(`SELECT prefix, secret FROM api_keys WHERE id = ?`).get(id),
+    ) as { prefix: string; secret: string | null };
+    return row.secret ? `${row.prefix}.${row.secret}` : null;
   }
 
   listApiKeys(filter: { actorId?: string; solutionId?: string } = {}): ApiKey[] {

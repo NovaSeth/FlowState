@@ -55,7 +55,6 @@ export function Overview({ initial }: { initial: DashboardPayload }) {
           label={t("overview.completed")}
           value={d.progress.percent}
           suffix="%"
-          accent
           prev={d.totalsPrev?.percent}
         />
       </div>

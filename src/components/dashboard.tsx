@@ -25,14 +25,12 @@ export function StatTile({
   label,
   value,
   suffix = "",
-  accent = false,
   prev,
 }: {
   label: string;
   value: number;
   suffix?: string;
-  accent?: boolean;
-  /** Yesterday's closing value: renders the day-over-day trend arrow. */
+  /** Yesterday's closing value: renders the day-over-day trend marker. */
   prev?: number;
 }) {
   const trend =
@@ -43,26 +41,37 @@ export function StatTile({
         : value < prev
           ? "down"
           : "flat";
+  // Relative day-over-day change; hidden when prev is 0 (no meaningful %).
+  // One decimal below 10% so small movements do not read as "0%".
+  const deltaPct =
+    prev === undefined || prev === 0 ? null : ((value - prev) / prev) * 100;
+  const deltaLabel =
+    deltaPct === null
+      ? null
+      : (() => {
+          const a = Math.round(Math.abs(deltaPct) * 10) / 10;
+          return a < 0.1 ? "<0.1" : a >= 10 ? String(Math.round(a)) : String(a);
+        })();
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border border-edge bg-canvas-subtle px-4 py-3">
       <span className="flex items-baseline gap-1.5">
         <AnimatedNumber
           value={value}
           suffix={suffix}
-          className={`font-mono text-2xl font-semibold tabular-nums ${accent ? "text-accent" : "text-fg"}`}
+          className="font-mono text-2xl font-semibold tabular-nums text-fg"
         />
-        {trend && (
+        {/* Flat days show nothing - the marker only appears on a real change. */}
+        {(trend === "up" || trend === "down") && (
           <span
             title={`${prev}${suffix} -> ${value}${suffix}`}
-            className={`font-mono text-sm font-semibold ${
-              trend === "up"
-                ? "text-success"
-                : trend === "down"
-                  ? "text-danger"
-                  : "text-fg-subtle"
+            className={`font-mono text-xs font-semibold ${
+              trend === "up" ? "text-success" : "text-danger"
             }`}
           >
-            {trend === "up" ? "↑" : trend === "down" ? "↓" : "-"}
+            {trend === "up" ? "▲" : "▼"}
+            {deltaLabel !== null && (
+              <span className="pl-0.5">{deltaLabel}%</span>
+            )}
           </span>
         )}
       </span>

@@ -257,6 +257,12 @@ final class AppStore: ObservableObject {
         dashboardMilestones = []
     }
 
+    /// Full token for the Users panel's "show" reveal (nil = unavailable).
+    @MainActor
+    func keyToken(_ id: String) async -> String? {
+        do { return try await api.keySecret(id: id) } catch { capture(error); return nil }
+    }
+
     // MARK: - Gamification (scoreboard pop + "YOU WIN" banner)
 
     @MainActor

@@ -118,12 +118,15 @@ private struct ActorRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    KindBadge(kind: actor.kind)
                     Text(actor.name).font(.system(size: 13)).foregroundStyle(DS.fg).lineLimit(1)
                     Spacer(minLength: 0)
                 }
-                Text(i18n.t("users.keyCount", ["n": "\(keyCount)"]))
-                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.fgSubtle)
+                // The agent/human tag sits UNDER the name (web parity).
+                HStack(spacing: 6) {
+                    KindBadge(kind: actor.kind)
+                    Text(i18n.t("users.keyCount", ["n": "\(keyCount)"]))
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.fgSubtle)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10).padding(.vertical, 10)
@@ -185,6 +188,7 @@ private struct KeyRow: View {
 }
 
 private struct KeyPaneView: View {
+    @EnvironmentObject private var store: AppStore
     @Environment(\.i18n) private var i18n
     let apiKey: ApiKey
     /// Human summaries of the key's grants (one entry per grant).
@@ -193,6 +197,9 @@ private struct KeyPaneView: View {
     let activity: [Activity]
     let actors: [Actor]
     @State private var tab = "details"
+    // Token reveal: nil = hidden (Show button), .some(nil) = unavailable
+    // (legacy key without a stored secret), .some(token) = revealed.
+    @State private var revealed: String??
 
     var body: some View {
         VStack(spacing: 0) {
@@ -212,6 +219,7 @@ private struct KeyPaneView: View {
                 activityFeed
             }
         }
+        .onChange(of: apiKey.id) { _ in revealed = nil }
     }
 
     private func tabButton(_ value: String, _ label: String) -> some View {
@@ -241,17 +249,50 @@ private struct KeyPaneView: View {
             (i18n.t("users.keyMinted"), "\(mintedCount)"),
         ]
         return VStack(spacing: 8) {
-            ForEach(rows, id: \.0) { label, value in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(label).font(.system(size: 13)).foregroundStyle(DS.fgSubtle)
-                    Spacer(minLength: 12)
-                    // Multi-line so the grants column can stack; still trailing-aligned.
-                    Text(value).font(.system(size: 13)).foregroundStyle(DS.fg).multilineTextAlignment(.trailing)
-                }
-                .padding(.bottom, 8)
-                .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)
+            detailRow(rows[0].0, rows[0].1)
+            tokenRow
+            ForEach(rows.dropFirst(), id: \.0) { label, value in
+                detailRow(label, value)
             }
         }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).font(.system(size: 13)).foregroundStyle(DS.fgSubtle)
+            Spacer(minLength: 12)
+            // Multi-line so the grants column can stack; still trailing-aligned.
+            Text(value).font(.system(size: 13)).foregroundStyle(DS.fg).multilineTextAlignment(.trailing)
+        }
+        .padding(.bottom, 8)
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)
+    }
+
+    // "Show" reveals the full token (web KeyDetails parity); legacy keys
+    // created before plaintext-secret storage report as unavailable.
+    private var tokenRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(i18n.t("users.keyToken")).font(.system(size: 13)).foregroundStyle(DS.fgSubtle)
+            Spacer(minLength: 12)
+            switch revealed {
+            case nil:
+                Button(i18n.t("users.showKey")) {
+                    _Concurrency.Task { revealed = .some(await store.keyToken(apiKey.id)) }
+                }
+                .buttonStyle(.link)
+            case .some(nil):
+                Text(i18n.t("users.keyTokenUnavailable"))
+                    .font(.system(size: 12)).foregroundStyle(DS.fgSubtle)
+                    .multilineTextAlignment(.trailing)
+            case .some(.some(let token)):
+                Text(token)
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(DS.fg)
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+        .padding(.bottom, 8)
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.borderMuted), alignment: .bottom)
     }
 
     private var activityFeed: some View {

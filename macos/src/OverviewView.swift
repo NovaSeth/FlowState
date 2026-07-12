@@ -46,22 +46,33 @@ struct OverviewView: View {
     private func statsRow(_ d: DashboardPayload) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5), spacing: 12) {
             StatTile(label: i18n.t("overview.solutions"), value: "\(d.totals.solutions)",
-                     trend: trend(d.totals.solutions, d.totalsPrev?.solutions))
+                     trend: trend(d.totals.solutions, d.totalsPrev?.solutions),
+                     deltaPct: deltaPct(d.totals.solutions, d.totalsPrev?.solutions))
             StatTile(label: i18n.t("overview.projects"), value: "\(d.totals.projects)",
-                     trend: trend(d.totals.projects, d.totalsPrev?.projects))
+                     trend: trend(d.totals.projects, d.totalsPrev?.projects),
+                     deltaPct: deltaPct(d.totals.projects, d.totalsPrev?.projects))
             StatTile(label: i18n.t("overview.milestones"), value: "\(d.totals.milestones)",
-                     trend: trend(d.totals.milestones, d.totalsPrev?.milestones))
+                     trend: trend(d.totals.milestones, d.totalsPrev?.milestones),
+                     deltaPct: deltaPct(d.totals.milestones, d.totalsPrev?.milestones))
             StatTile(label: i18n.t("overview.tasks"), value: "\(d.totals.tasks)",
-                     trend: trend(d.totals.tasks, d.totalsPrev?.tasks))
-            StatTile(label: i18n.t("overview.completed"), value: "\(d.progress.percent)%", accent: true,
-                     trend: trend(d.progress.percent, d.totalsPrev?.percent))
+                     trend: trend(d.totals.tasks, d.totalsPrev?.tasks),
+                     deltaPct: deltaPct(d.totals.tasks, d.totalsPrev?.tasks))
+            StatTile(label: i18n.t("overview.completed"), value: "\(d.progress.percent)%",
+                     trend: trend(d.progress.percent, d.totalsPrev?.percent),
+                     deltaPct: deltaPct(d.progress.percent, d.totalsPrev?.percent))
         }
     }
 
-    /// Day-over-day direction for a stat tile (nil prev = older server, no arrow).
+    /// Day-over-day direction for a stat tile (nil prev = older server, no marker).
     private func trend(_ now: Int, _ prev: Int?) -> StatTile.Trend? {
         guard let prev else { return nil }
         return now > prev ? .up : now < prev ? .down : .flat
+    }
+
+    /// Relative day-over-day change in percent; nil when prev is 0 or missing.
+    private func deltaPct(_ now: Int, _ prev: Int?) -> Double? {
+        guard let prev, prev != 0 else { return nil }
+        return Double(now - prev) / Double(prev) * 100
     }
 
     private func open(_ ctx: TaskContext, _ taskId: String) {
@@ -81,20 +92,32 @@ struct StatTile: View {
 
     var label: String
     var value: String
-    var accent = false
-    /// Day-over-day direction vs yesterday's closing value (nil = no arrow).
+    /// Day-over-day direction vs yesterday's closing value (nil = no marker).
     var trend: Trend? = nil
+    /// Relative change in percent shown next to the triangle (nil = hidden).
+    var deltaPct: Double? = nil
+
+    // One decimal below 10% so small movements do not read as "0%".
+    private var marker: String {
+        guard let trend, trend != .flat else { return "" }
+        let symbol = trend == .up ? "▲" : "▼"
+        guard let deltaPct else { return symbol }
+        let a = abs(deltaPct)
+        let label = a < 0.1 ? "<0.1" : a >= 10 ? "\(Int(a.rounded()))" : String(format: "%.1f", a)
+        return "\(symbol) \(label)%"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(value)
                     .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(accent ? DS.accent : DS.fg)
-                if let trend {
-                    Text(trend == .up ? "↑" : trend == .down ? "↓" : "-")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(trend == .up ? DS.success : trend == .down ? DS.danger : DS.fgSubtle)
+                    .foregroundStyle(DS.fg)
+                // Flat days show nothing - the marker only appears on a change.
+                if let trend, trend != .flat {
+                    Text(marker)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(trend == .up ? DS.success : DS.danger)
                 }
             }
             Text(label).font(.system(size: 12)).foregroundStyle(DS.fgMuted)

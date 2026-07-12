@@ -21,6 +21,14 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Added
 
+- API keys can be revealed in the Users panel: a **Token / Show** row in the
+  key details (web + macOS) returns the full `fsk_...` token. Backed by a new
+  plaintext `secret` column (an explicit decision for this local single-user
+  tool - authentication still verifies only the sha-256 hash) and
+  `GET /api/keys/:id/secret` guarded by the same authorization circle as
+  revoke. Keys created before this change report as unavailable.
+- The agent/human tag in the Users actor list moved from the left of the name
+  to the line under it, next to the key count (web + macOS).
 - The Explorer's project kebab menu gained an **Open dashboard** item that opens
   the project dashboard as a right-edge inspector panel (like the task detail
   panel, a third wider): title + status + progress, a KPI row of mini stat
@@ -33,10 +41,11 @@ separate per-commit UI build counter and is intentionally independent of this ve
 - The daily status chart shows a hover tooltip: a vertical guide snaps to the
   nearest day and a card lists every status' transition count for that day
   (web + macOS).
-- The KPI stat tiles show a day-over-day trend arrow (up / down / dash) next to
-  each value, comparing against yesterday's closing figures. The dashboard API
-  payload gained `totalsPrev` (counts + done-% as of the start of today,
-  approximated from `createdAt` / `completedAt`).
+- The KPI stat tiles show a day-over-day trend marker (green/red triangle with
+  the relative % change, one decimal below 10%; flat days show nothing),
+  comparing against yesterday's closing figures. The dashboard API payload
+  gained `totalsPrev` (counts + done-% as of the start of today, approximated
+  from `createdAt` / `completedAt`).
 
 ### Removed
 
@@ -69,6 +78,10 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Fixed
 
+- The daily chart no longer stretches its axis labels into an unreadable smear
+  on wide windows: the SVG viewBox now tracks the real container width
+  (ResizeObserver), so text renders 1:1 instead of `preserveAspectRatio="none"`
+  distorting it.
 - Security and correctness hardening from a multi-agent audit (see project history).
 
 ### Removed
