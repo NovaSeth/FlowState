@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { Icon } from "./icons";
 import { btnGhost, btnPrimary, inputCls } from "./ui";
 import { useT } from "@/i18n/provider";
@@ -27,6 +28,8 @@ interface Option {
 
 export function EntityMenu({
   editTitle,
+  openHref,
+  openLabel,
   name,
   description,
   color,
@@ -41,6 +44,9 @@ export function EntityMenu({
 }: {
   /** Localized dialog heading, e.g. "Edit project". */
   editTitle: string;
+  /** Optional navigation item pinned first, e.g. the project's dashboard page. */
+  openHref?: string;
+  openLabel?: string;
   name: string;
   description: string;
   /** Present only for solutions - shows the color field. */
@@ -147,6 +153,17 @@ export function EntityMenu({
               style={{ top: pos.top, right: pos.right }}
               role="menu"
             >
+              {openHref && openLabel && (
+                <>
+                  <Link href={openHref} onClick={close} className={itemCls}>
+                    <span className="w-3.5 shrink-0">
+                      <Icon name="overview" size={13} />
+                    </span>
+                    {openLabel}
+                  </Link>
+                  <div className="my-1 border-t border-edge-muted" />
+                </>
+              )}
               <button
                 disabled={busy}
                 onClick={() => {

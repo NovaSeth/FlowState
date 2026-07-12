@@ -362,6 +362,8 @@ export function Explorer({
           actions={
             <EntityMenu
               editTitle={t("entity.editProject")}
+              openHref={`/projects/${p.id}`}
+              openLabel={t("entity.openDashboard")}
               name={p.name}
               description={p.description ?? ""}
               status={p.status}

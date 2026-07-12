@@ -21,6 +21,10 @@ separate per-commit UI build counter and is intentionally independent of this ve
 
 ### Added
 
+- The Explorer's project kebab menu gained an **Open dashboard** item linking to
+  the single-project page (`/projects/[id]`) - previously that page was only
+  reachable from task links on the Overview. The native macOS app needs no
+  equivalent: its Explorer already shows the project dashboard inline.
 - The single-project page (`/projects/[id]`) gained a **Dashboard | Columns**
   view toggle. "Columns" is the Explorer's Miller cascade scoped to the project
   (Milestones → Tasks → detail), reusing the shared column primitives and the

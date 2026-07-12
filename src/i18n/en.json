@@ -178,6 +178,7 @@
   },
   "entity": {
     "actions": "Actions",
+    "openDashboard": "Open dashboard",
     "edit": "Edit details",
     "editSolution": "Edit solution",
     "editProject": "Edit project",
