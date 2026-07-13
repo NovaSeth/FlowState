@@ -15,7 +15,7 @@ struct ServerRailView: View {
     var body: some View {
         VStack(spacing: 6) {
             entry(
-                label: i18n.t("servers.local"), text: "local",
+                label: i18n.t("servers.local"), text: "local", status: true,
                 active: store.activeConnectionId == nil,
                 onTap: { switchTo(nil) }
             )
@@ -27,7 +27,10 @@ struct ServerRailView: View {
 
             ForEach(store.connections) { c in
                 entry(
-                    label: "\(c.name) - \(c.host):\(c.port)", text: c.host,
+                    label: c.name.isEmpty ? "\(c.host):\(c.port)" : "\(c.name) - \(c.host):\(c.port)",
+                    // Show the custom name if given, else the host/IP.
+                    text: c.name.isEmpty ? c.host : c.name,
+                    status: store.connectionHealth[c.id],
                     active: store.activeConnectionId == c.id,
                     onTap: { switchTo(c.id) },
                     onRemove: { _Concurrency.Task { await store.removeConnection(c.id) } }
@@ -73,11 +76,11 @@ struct ServerRailView: View {
     // Workspace-switcher chip (Discord/Slack): a rounded chip with a left-edge
     // indicator pill - tall when active, short on hover, hidden otherwise.
     private func entry(
-        label: String, text: String, active: Bool,
+        label: String, text: String, status: Bool?, active: Bool,
         onTap: @escaping () -> Void,
         onRemove: (() -> Void)? = nil
     ) -> some View {
-        RailChip(text: text, active: active, brand: DS.brand, onTap: onTap)
+        RailChip(text: text, status: status, active: active, brand: DS.brand, onTap: onTap)
             .help(label)
             .contextMenu {
                 if let onRemove {
@@ -87,9 +90,11 @@ struct ServerRailView: View {
     }
 }
 
-// A single rail chip with its own hover state for the left indicator pill.
+// A single rail chip with its own hover state + a reachability status dot.
 private struct RailChip: View {
     let text: String
+    /// Reachability: true = green dot, false = red dot, nil = still checking.
+    let status: Bool?
     let active: Bool
     let brand: Color
     let onTap: () -> Void
@@ -100,16 +105,24 @@ private struct RailChip: View {
         // chip that brightens on hover. No detached edge pill - on a narrow
         // centered chip it reads as a stray element.
         Button(action: onTap) {
-            Text(text)
-                .font(.system(size: 10, design: .monospaced))
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 6).padding(.vertical, 8)
-                .frame(width: 64)
-                .background(active ? Color.white : .white.opacity(hovering ? 0.2 : 0.1))
-                .foregroundStyle(active ? brand : .white.opacity(hovering ? 1 : 0.7))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .contentShape(Rectangle())
+            HStack(spacing: 5) {
+                Text(text)
+                    .font(.system(size: 10, design: .monospaced))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                // Reachability dot to the right of the name / host.
+                if let status {
+                    Circle()
+                        .fill(status ? DS.success : DS.danger)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 8)
+            .frame(width: 68)
+            .background(active ? Color.white : .white.opacity(hovering ? 0.2 : 0.1))
+            .foregroundStyle(active ? brand : .white.opacity(hovering ? 1 : 0.7))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -129,16 +142,15 @@ private struct AddConnectionSheet: View {
     @State private var busy = false
     @State private var failed = false
 
+    // Name is optional (the rail falls back to the host/IP); host + port required.
     private var valid: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty
-            && !host.trimmingCharacters(in: .whitespaces).isEmpty
-            && Int(port) != nil
+        !host.trimmingCharacters(in: .whitespaces).isEmpty && Int(port) != nil
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(i18n.t("servers.add")).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.fg)
-            TextField(i18n.t("servers.namePlaceholder"), text: $name)
+            TextField(i18n.t("servers.nameOptionalPlaceholder"), text: $name)
                 .textFieldStyle(.roundedBorder)
             HStack(spacing: 8) {
                 TextField(i18n.t("servers.hostPlaceholder"), text: $host)
@@ -187,37 +199,59 @@ private struct AddConnectionSheet: View {
     }
 }
 
-// Full-screen transition while the data source switches: a "warp jump" starfield
-// (SwiftUI Canvas - the native answer to the web's three.js hyperspace, since the
-// app renders natively, not in WebGL), a breathing brand mark, the target name
-// and three bouncing dots.
+// The data-source switch transition (native answer to the web's three.js
+// wormhole, since the app renders in SwiftUI not WebGL): a Canvas "warp jump"
+// starfield with the connection status in the centre. On failure the warp fades
+// and a "could not reach" card with a Back button remains. Shown over the
+// CONTENT area only (DashboardRootView), so both rails stay visible + clickable.
 struct ServerSwitchOverlay: View {
+    @EnvironmentObject private var store: AppStore
     @Environment(\.i18n) private var i18n
     let label: String
+    let phase: AppStore.SwitchPhase
     @State private var animate = false
     @State private var start = Date()
 
+    private var failed: Bool { phase == .failed }
+
     var body: some View {
         ZStack {
-            Rectangle().fill(DS.canvas.opacity(0.85)).ignoresSafeArea()
-            WarpField(start: start, color: DS.accent).ignoresSafeArea()
-            VStack(spacing: 20) {
-                BrandMark(dotColor: DS.accent, size: 48)
-                    .scaleEffect(animate ? 1.12 : 1.0)
-                    .opacity(animate ? 1.0 : 0.75)
-                    .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: animate)
-                VStack(spacing: 4) {
-                    Text(i18n.t("servers.switching")).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.fg)
-                    Text(label).font(.system(size: 12, design: .monospaced)).foregroundStyle(DS.accent)
+            Rectangle().fill(DS.canvas).ignoresSafeArea()
+            if !failed {
+                WarpField(start: start, color: DS.accent).ignoresSafeArea()
+            }
+            if failed {
+                VStack(spacing: 16) {
+                    ZStack {
+                        Circle().fill(DS.dangerMuted).frame(width: 48, height: 48)
+                        Image(systemName: Glyph.symbol("alert")).font(.system(size: 22)).foregroundStyle(DS.danger)
+                    }
+                    VStack(spacing: 4) {
+                        Text(i18n.t("servers.connectFailed")).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.fg)
+                        Text(label).font(.system(size: 12, design: .monospaced)).foregroundStyle(DS.fgSubtle)
+                    }
+                    Button(i18n.t("common.back")) { store.dismissSwitch() }
+                        .buttonStyle(.bordered)
                 }
-                HStack(spacing: 6) {
-                    ForEach(0..<3, id: \.self) { i in
-                        Circle().fill(DS.accent).frame(width: 8, height: 8)
-                            .offset(y: animate ? -5 : 0)
-                            .animation(
-                                .easeInOut(duration: 0.5).repeatForever(autoreverses: true)
-                                    .delay(Double(i) * 0.15),
-                                value: animate)
+            } else {
+                VStack(spacing: 20) {
+                    BrandMark(dotColor: DS.accent, size: 48)
+                        .scaleEffect(animate ? 1.12 : 1.0)
+                        .opacity(animate ? 1.0 : 0.75)
+                        .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: animate)
+                    VStack(spacing: 4) {
+                        Text(i18n.t("servers.switching")).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.fg)
+                        Text(label).font(.system(size: 12, design: .monospaced)).foregroundStyle(DS.accent)
+                    }
+                    HStack(spacing: 6) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Circle().fill(DS.accent).frame(width: 8, height: 8)
+                                .offset(y: animate ? -5 : 0)
+                                .animation(
+                                    .easeInOut(duration: 0.5).repeatForever(autoreverses: true)
+                                        .delay(Double(i) * 0.15),
+                                    value: animate)
+                        }
                     }
                 }
             }
@@ -229,6 +263,11 @@ struct ServerSwitchOverlay: View {
 // Streaking-starfield warp: particles radiate outward from the centre, faster
 // over time - the "oooo WOW" of jumping to another instance. Deterministic per
 // index (no Math.random), driven by TimelineView.
+// A wireframe TUNNEL drawn in Canvas (the native counterpart to the web's
+// three.js wormhole): concentric rings receding to a dark throat with
+// perspective, plus radial spokes forming the grid, all flowing toward the
+// viewer as we dive in. The throat drifts so the tube appears to bend. Blue,
+// from the side navigation.
 private struct WarpField: View {
     let start: Date
     let color: Color
@@ -237,25 +276,36 @@ private struct WarpField: View {
         TimelineView(.animation) { tl in
             Canvas { ctx, size in
                 let t = tl.date.timeIntervalSince(start)
-                let boost = 1 + min(t / 0.5, 1) * 3
-                let cx = size.width / 2, cy = size.height / 2
-                let maxR = max(cx, cy)
-                let n = 220
-                for i in 0..<n {
-                    let angle = Double((i &* 2654435761) % 1000) / 1000 * 2 * .pi
-                    let seed = Double((i &* 40503) % 997) / 997
-                    let speed = (70 + seed * 260) * boost
-                    let period = maxR + 120
-                    let r = (t * speed + seed * period).truncatingRemainder(dividingBy: period)
-                    let tail = 10 + seed * 26
-                    let pr = max(0, r - tail)
-                    let x = cx + cos(angle) * r, y = cy + sin(angle) * r
-                    let px = cx + cos(angle) * pr, py = cy + sin(angle) * pr
-                    let alpha = min(1, r / 60) * max(0, 1 - r / (maxR + 40))
-                    var path = Path()
-                    path.move(to: CGPoint(x: px, y: py))
-                    path.addLine(to: CGPoint(x: x, y: y))
-                    ctx.stroke(path, with: .color(color.opacity(alpha)), lineWidth: 1.4)
+                // The throat drifts to evoke a bending tube.
+                let cx = size.width / 2 + sin(t * 0.5) * size.width * 0.07
+                let cy = size.height / 2 + cos(t * 0.4) * size.height * 0.07
+                let maxR = hypot(size.width, size.height) * 0.62
+                let numRings = 28
+                let flow = (t * 0.16).truncatingRemainder(dividingBy: 1)
+
+                // Radial spokes (fade toward the far throat).
+                let numSpokes = 24
+                for s in 0..<numSpokes {
+                    let a = Double(s) / Double(numSpokes) * 2 * .pi
+                    var p = Path()
+                    p.move(to: CGPoint(x: cx + cos(a) * maxR * 0.06,
+                                       y: cy + sin(a) * maxR * 0.06))
+                    p.addLine(to: CGPoint(x: cx + cos(a) * maxR, y: cy + sin(a) * maxR))
+                    ctx.stroke(p, with: .color(color.opacity(0.10)), lineWidth: 1)
+                }
+
+                // Concentric rings: perspective bunches them toward the centre
+                // (far), so it reads as depth; they flow outward past the viewer.
+                for k in 0..<numRings {
+                    let d = (Double(k) / Double(numRings) + flow)
+                        .truncatingRemainder(dividingBy: 1)
+                    let radius = maxR * pow(d, 1.7)
+                    if radius < 2 { continue }
+                    let alpha = min(1, d * 2.2) * max(0, 1 - d * 0.25)
+                    ctx.stroke(
+                        Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius,
+                                               width: radius * 2, height: radius * 2)),
+                        with: .color(color.opacity(alpha * 0.75)), lineWidth: 1.2)
                 }
             }
         }

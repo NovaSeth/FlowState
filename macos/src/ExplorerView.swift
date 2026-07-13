@@ -656,11 +656,13 @@ struct InlineCreateForm: View {
         } else {
             Button { open = true } label: {
                 HStack(spacing: 6) {
+                    Spacer(minLength: 0)
                     Image(systemName: "plus").font(.system(size: 12))
-                    Text(triggerLabel).font(.system(size: 13))
+                    Text(triggerLabel).font(.system(size: 13, weight: .medium))
                     Spacer(minLength: 0)
                 }
-                .foregroundStyle(DS.fgMuted)
+                // Accent-colored + centered, consistent with the Users CTAs (web parity).
+                .foregroundStyle(DS.accent)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
                 .overlay(

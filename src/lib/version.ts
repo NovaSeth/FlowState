@@ -5,4 +5,4 @@
 // Shared with the native macOS app (CFBundleShortVersionString in
 // macos/build.sh) and exposed via /api/settings so a dashboard connected to a
 // REMOTE instance can show the version of the source it is actually reading.
-export const UI_VERSION = "1.76";
+export const UI_VERSION = "1.78";

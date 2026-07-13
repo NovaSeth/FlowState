@@ -13,13 +13,19 @@ struct DashboardRootView: View {
             NavRail()
             VStack(spacing: 0) {
                 TopBar()
-                contentArea
+                // The switch overlay covers ONLY the content (below the top bar,
+                // right of both rails) so the whole blue bar stays intact.
+                ZStack {
+                    contentArea
+                    if let phase = store.switchPhase, let name = store.switchingToName {
+                        ServerSwitchOverlay(label: name, phase: phase)
+                    }
+                }
             }
         }
         .frame(minWidth: 960, minHeight: 600)
         .overlay { if !store.isOnline { OfflineOverlay() } }
         .overlay { if let win = store.winBanner { WinOverlay(kind: win) } }
-        .overlay { if let name = store.switchingToName { ServerSwitchOverlay(label: name) } }
         .task { await store.bootstrap() }
         // Inject localization as the OUTERMOST modifier so the overlays above
         // (offline / win) inherit it too - otherwise they showed raw i18n keys.

@@ -63,10 +63,19 @@ npm run build && npm run start
 
 ### Environment
 
-- `FS_API_KEY` - root/admin API key for bootstrap (e.g. minting the first agent
-  key).
-- `FS_AUTH` - set to `strict` to require a key for mutations.
-- `FS_DB_PATH` - path to the SQLite database file. Defaults to `data/fs.db`.
+All configuration is via environment variables (none are required for a local
+run - the defaults give you an open localhost server):
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `FS_DB_PATH` | `data/fs.db` | Path to the SQLite database file. It is created automatically on first run (the parent directory must be writable). |
+| `FS_API_KEY` | _(unset)_ | Admin / bootstrap token. When set, a request whose `x-api-key` equals it is treated as admin, and mutations then require a valid key. Also read by the MCP server and used to mint the first agent key. |
+| `FS_AUTH` | _(unset)_ | Set to `strict` to require a key for every mutation (`POST`/`PATCH`/`PUT`/`DELETE`), including from the local dashboard. |
+| `FS_REQUIRE_KEY` | _(unset)_ | Set to `1` (or `true`/`yes`) to force "require key" mode from the environment. EVERY client must then present a valid key on the data routes (401 otherwise), AND the management endpoints (`/api/settings`, `/api/connections`) are NOT exempt - so an anonymous visitor can neither read data nor turn the protection off. This is the setting to use for a public / hosted deployment. (There is also a revertible Settings toggle for the same "require key" mode, meant for local use; when the env var forces it, that toggle cannot switch it off.) |
+
+The scheme a remote client uses to reach a self-hosted server is derived from the
+port: port `443` is treated as `https`, anything else as plain `http` (see
+`remoteBase()` in `src/lib/connections.ts`).
 
 ### MCP and skill
 
@@ -98,14 +107,131 @@ login, shows live status via a wave icon (green running / gray stopped / amber
 transitioning), and offers Start / Stop / Restart and Open Dashboard from its menu.
 
 ```bash
-macos/install.sh   # builds FlowState.app, installs to /Applications, autostarts at login
+macos/build.sh     # compiles macos/build/FlowState.app with swiftc (no Xcode project)
+macos/install.sh   # installs the app to /Applications and the server as a launchd agent
 ```
+
+`macos/install.sh` registers the server as an independent launchd LaunchAgent
+(`com.flowstate.server`) that starts at login and is kept alive by launchd, then
+installs the menu-bar app as a **client** of that server (it monitors and can
+Start / Stop / Restart the agent, but never owns or kills it). Because the repo
+lives under `~/Documents` (TCC-protected), the agent needs Full Disk Access
+granted to `node` once - the installer points you at the setting.
 
 See [macos/README.md](macos/README.md) for details.
 
 > The macOS app is **optional**. The server is a normal Next.js app you can run on
 > its own with `npm run start` (or `npm run dev`) - the menu-bar app just supervises
 > that same server for you, and can attach to an already-running one with `--no-server`.
+
+## Self-hosting (running the server on a remote host)
+
+Flow State is a plain Next.js server, so you can run it standalone on any host or
+VPS and let other people point their dashboard at it over the connections rail.
+
+**Requirements**
+
+- Node **22+** (24+ recommended - `node:sqlite` is flagless there; on 22.12-23
+  add `NODE_OPTIONS=--experimental-sqlite`).
+- A persistent, writable path for the database (`FS_DB_PATH`); back it up like any
+  SQLite file.
+- A port to listen on (bind it to loopback and put a reverse proxy in front).
+- **A key.** Set `FS_REQUIRE_KEY=1` and a strong `FS_API_KEY` so the instance is
+  token-gated and not publicly readable. Without this, anyone who can reach the
+  host can read (and, with an admin key unset, write) everything. This is the one
+  step you must not skip for a public host.
+
+**Build and run**
+
+```bash
+git clone https://github.com/NovaSeth/FlowState.git
+cd FlowState
+npm ci
+npm run build
+# Bind to loopback; the reverse proxy terminates TLS and forwards to it.
+FS_REQUIRE_KEY=1 FS_API_KEY='a-long-random-secret' FS_DB_PATH=/var/lib/flowstate/fs.db \
+  npx next start -H 127.0.0.1 -p 3000
+```
+
+**systemd service** (`/etc/systemd/system/flowstate.service`)
+
+```ini
+[Unit]
+Description=Flow State
+After=network.target
+
+[Service]
+Type=simple
+User=flowstate
+WorkingDirectory=/opt/flowstate
+Environment=NODE_ENV=production
+Environment=FS_REQUIRE_KEY=1
+Environment=FS_API_KEY=replace-with-a-long-random-secret
+Environment=FS_DB_PATH=/var/lib/flowstate/fs.db
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1 -p 3000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then `sudo systemctl enable --now flowstate` (adjust the `npm`/`node` path to your
+install).
+
+**Apache reverse proxy with TLS** (needs `mod_proxy`, `mod_proxy_http`, `mod_ssl`)
+
+The live dashboard streams over Server-Sent Events on `/api/events`, so that route
+must NOT be buffered - forward it with `flushpackets=on` so events reach the client
+immediately.
+
+```apache
+<VirtualHost *:443>
+    ServerName fs.example.com
+
+    SSLEngine on
+    SSLCertificateFile    /etc/letsencrypt/live/fs.example.com/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/fs.example.com/privkey.pem
+
+    ProxyPreserveHost On
+
+    # SSE: flush each event, no buffering.
+    <Location /api/events>
+        ProxyPass        http://127.0.0.1:3000/api/events flushpackets=on
+        ProxyPassReverse http://127.0.0.1:3000/api/events
+    </Location>
+
+    # Everything else.
+    ProxyPass        / http://127.0.0.1:3000/
+    ProxyPassReverse / http://127.0.0.1:3000/
+</VirtualHost>
+```
+
+(On nginx the equivalent is `proxy_buffering off;` on the `/api/events` location.)
+
+A real deployment of this exists at <https://fs.monokoda.com> as an example.
+
+**Connect to it from another machine.** In that machine's dashboard, open the left
+connections rail, click `+`, and enter the domain as the host (e.g.
+`fs.monokoda.com`), `443` as the port (which selects `https`), an optional name,
+and paste the API key. Click the new entry to switch to it - the whole `/api`
+surface of your local server then proxies to the remote instance.
+
+## Multi-instance (connections rail)
+
+The slim strip on the far left is the **connections rail**: it lists the data
+sources this dashboard can show - `local` on top, then any remote Flow State
+instances you have added (host + a reachability dot), and a `+` to add one.
+
+- **Status dots:** green = reachable, red = down; each saved remote is pinged
+  periodically so a dot flips when a server goes up or down.
+- **Switching:** clicking an entry activates that source server-side (a short
+  "wormhole" transition plays, then the page reloads). From then on every `/api`
+  route, the SSE stream, and the server-rendered pages read from that source; the
+  header shows which one is active.
+- **Local stays in control:** the connections/settings management endpoints always
+  run against your own server, so you can always switch back. A remote source is
+  **not process-controllable** from the client - the app hides the server
+  Start / Stop / Restart controls while a remote is active (you are a guest on it).
 
 ## Internationalization
 
@@ -138,13 +264,21 @@ Auth is resolved per request (see `resolveContext` in `src/lib/http.ts`):
   targets one project (`{"projectId": ...}`), one whole solution
   (`{"solutionId": ...}`) or everything (neither id), with `read` or `write`
   rights per grant. Reads and lists are filtered to the covered places;
-  mutations need a covering `write` grant. Delegated (child) keys can only
-  narrow the parent key's grants, never widen them. Legacy single
-  `solutionId`+`scope` keys keep working as a one-grant key.
+  mutations need a covering `write` grant. One key = one user - each
+  `fs_mint_agent_key` call creates its own agent actor with its own key (there is
+  no sub-key hierarchy or "parent" key); a non-admin key simply cannot grant
+  access it does not itself hold. Legacy single `solutionId`+`scope` keys keep
+  working as a one-grant key.
+- **Require a key from everyone (public hosting):** set `FS_REQUIRE_KEY=1`. Then
+  every client must present a valid key on the data routes AND the management
+  endpoints are not exempt, so an anonymous visitor can neither read data nor
+  disable the protection. This is the right control when the server is exposed
+  beyond a trusted localhost - see [Self-hosting](#self-hosting-running-the-server-on-a-remote-host).
 
 Because GET endpoints are unauthenticated in open mode, **do not expose the
-open-mode server to untrusted networks**. For LAN/shared/public hosting, set an
-admin key and/or `FS_AUTH=strict`.
+open-mode server to untrusted networks**. For LAN or shared hosting, set an admin
+key and/or `FS_AUTH=strict`; for a public / internet-facing deployment use
+`FS_REQUIRE_KEY=1` with a strong `FS_API_KEY`.
 
 ## License
 

@@ -713,7 +713,7 @@ const TOOLS = [
   {
     name: "fs_revoke_key",
     description:
-      "Revoke an API key by id (key_...). The key stops working. Authorization as in the API: your own key / the delegation parent / the owning actor / admin.",
+      "Revoke an API key by id (key_...). The key stops working. Authorization as in the API: your own key / the owning actor / admin (one key = one user; no delegation parent).",
     inputSchema: {
       type: "object",
       properties: { keyId: { type: "string" } },
