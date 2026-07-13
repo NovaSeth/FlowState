@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isIP } from "node:net";
 import { getDb } from "./db";
 import { AppError } from "./errors";
 
@@ -28,6 +29,89 @@ export interface Connection {
 /** Full row - the stored key never leaves the server (proxy auth only). */
 export interface ConnectionWithKey extends Connection {
   apiKey: string;
+}
+
+/** Well-known TLS ports: a connection on one of these speaks https, anything
+ *  else is treated as a plain-HTTP LAN instance. Includes 8443 so a TLS remote
+ *  on the common alternate port is not silently downgraded to cleartext. */
+const HTTPS_PORTS = new Set([443, 8443]);
+
+/** Base URL of a remote instance. 443/8443 -> https (a hosted deployment behind
+ *  TLS, e.g. fs.monokoda.com); anything else -> http (a plain LAN instance).
+ *  `host` is validated at creation (assertRemoteHostAllowed) to be a bare
+ *  hostname / IP literal, so interpolating it here cannot inject a path,
+ *  authority, or fragment into the URL. */
+export function remoteBase(c: { host: string; port: number }): string {
+  const scheme = HTTPS_PORTS.has(c.port) ? "https" : "http";
+  const hostPart = c.port === 443 || c.port === 80 ? c.host : `${c.host}:${c.port}`;
+  return `${scheme}://${hostPart}`;
+}
+
+const linkLocalError = () =>
+  new AppError(422, "Connection host is a link-local address, which is not allowed");
+
+/** True for the IPv4 link-local / cloud-metadata range 169.254.0.0/16 (e.g. the
+ *  AWS/GCP metadata endpoint 169.254.169.254). Never a legitimate remote. */
+function isLinkLocalV4(octets: number[]): boolean {
+  return octets.length === 4 && octets[0] === 169 && octets[1] === 254;
+}
+
+/** Decodes the embedded IPv4 of an IPv4-mapped IPv6 address (::ffff:a.b.c.d,
+ *  which Node normalizes to ::ffff:XXXX:YYYY) so it can't smuggle a blocked v4
+ *  address past the range check. Returns the four octets, or null. */
+function mappedV4Octets(ipv6: string): number[] | null {
+  const m = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ipv6);
+  if (!m) return null;
+  const hi = parseInt(m[1], 16);
+  const lo = parseInt(m[2], 16);
+  return [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255];
+}
+
+/**
+ * Validates a remote connection host against SSRF abuse. Two guards:
+ *  1. FORMAT: a bare hostname or IP literal only. No scheme, path, query,
+ *     fragment, userinfo, or embedded port - those let a crafted host inject
+ *     into the URL (e.g. "169.254.169.254/latest/meta-data/#" turns the
+ *     appended "/api/dashboard" into a fragment, so the request hits the
+ *     metadata path). remoteBase interpolates the host raw, so this is the
+ *     line of defense.
+ *  2. ADDRESS: reject link-local / cloud-metadata addresses. The check runs on
+ *     the URL-NORMALIZED host, so alternate IPv4 encodings (decimal 2852039166,
+ *     hex 0xA9FEA9FE, octal, and IPv4-mapped IPv6 ::ffff:169.254.169.254) can't
+ *     slip a blocked address past it. Loopback and private LAN ranges stay
+ *     allowed on purpose - connecting to a LAN instance (192.168.x, 10.x,
+ *     localhost) is the primary use case.
+ */
+function assertRemoteHostAllowed(host: string): void {
+  // Allow '.' inside the brackets so a valid dotted IPv4-mapped IPv6 literal
+  // (RFC 4291 2.2.3, e.g. [::ffff:192.168.1.10]) is not wrongly rejected; a
+  // link-local one (e.g. [::ffff:169.254.169.254]) still normalizes to
+  // [::ffff:a9fe:a9fe] and is caught by mappedV4Octets below.
+  const bracketed = /^\[[0-9a-fA-F:.]+\]$/.test(host);
+  if (!bracketed && !/^[a-zA-Z0-9._-]+$/.test(host)) {
+    throw new AppError(
+      422,
+      "Connection host must be a plain hostname or IP address (no scheme, path, port, or credentials)",
+    );
+  }
+  // Normalize through the same URL parser fetch() uses, so a numeric IP in any
+  // encoding collapses to its canonical form before we range-check it.
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${host}`).hostname;
+  } catch {
+    throw new AppError(422, "Connection host is not a valid hostname or IP address");
+  }
+  const bare = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const kind = isIP(bare);
+  if (kind === 4) {
+    if (isLinkLocalV4(bare.split(".").map(Number))) throw linkLocalError();
+  } else if (kind === 6) {
+    // fe80::/10 (link-local) and any IPv4-mapped link-local address.
+    if (/^fe[89ab]/.test(bare)) throw linkLocalError();
+    const mapped = mappedV4Octets(bare);
+    if (mapped && isLinkLocalV4(mapped)) throw linkLocalError();
+  }
 }
 
 const ACTIVE_KEY = "activeConnectionId";
@@ -78,6 +162,7 @@ export function createConnection(input: {
   if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
     throw new AppError(422, "Connection requires a host and a valid port");
   }
+  assertRemoteHostAllowed(host);
   const id = "cn_" + randomBytes(9).toString("base64url");
   getDb()
     .prepare(
@@ -127,8 +212,11 @@ export async function setActiveConnection(id: string | null): Promise<void> {
   if (!row) throw new AppError(404, "Connection not found");
   let res: Response;
   try {
-    res = await fetch(`http://${row.host}:${row.port}/api/dashboard`, {
+    res = await fetch(`${remoteBase(row)}/api/dashboard`, {
       headers: row.apiKey ? { "x-api-key": row.apiKey } : undefined,
+      // A real remote never redirects /api; refusing to follow one closes the
+      // redirect-to-internal-host SSRF path.
+      redirect: "error",
       signal: AbortSignal.timeout(4000),
     });
   } catch {
@@ -153,8 +241,9 @@ export async function connectionsHealth(): Promise<Record<string, boolean>> {
   const entries = await Promise.all(
     rows.map(async (r) => {
       try {
-        const res = await fetch(`http://${r.host}:${r.port}/api/dashboard`, {
+        const res = await fetch(`${remoteBase(r)}/api/dashboard`, {
           headers: r.apiKey ? { "x-api-key": r.apiKey } : undefined,
+          redirect: "error",
           signal: AbortSignal.timeout(2500),
         });
         return [r.id, res.ok] as const;
@@ -166,11 +255,21 @@ export async function connectionsHealth(): Promise<Record<string, boolean>> {
   return Object.fromEntries(entries);
 }
 
+/** Require-key forced by the environment (FS_REQUIRE_KEY=1) - for a hosted /
+ *  public deployment. When forced, it cannot be turned off through the API and
+ *  even the management endpoints demand a key (see http.ts), so an anonymous
+ *  visitor can neither read data nor disable the protection. */
+export function requireKeyForced(): boolean {
+  const v = (process.env.FS_REQUIRE_KEY ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 export function requireKeyEnabled(): boolean {
-  return getSetting(REQUIRE_KEY) === "1";
+  return requireKeyForced() || getSetting(REQUIRE_KEY) === "1";
 }
 
 export function setRequireKey(on: boolean): void {
+  // When forced by the environment the DB toggle is irrelevant (cannot disable).
   putSetting(REQUIRE_KEY, on ? "1" : null);
 }
 
@@ -193,10 +292,11 @@ export async function appSettingsPayload(): Promise<{
     sourceVersion = null;
     try {
       const res = await fetch(
-        `http://${active.host}:${active.port}/api/settings`,
+        `${remoteBase(active)}/api/settings`,
         {
           headers: active.apiKey ? { "x-api-key": active.apiKey } : undefined,
           cache: "no-store",
+          redirect: "error",
           signal: AbortSignal.timeout(3000),
         },
       );

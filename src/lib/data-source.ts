@@ -1,5 +1,5 @@
 import { repo } from "./repo";
-import { getActiveConnection, type ConnectionWithKey } from "./connections";
+import { getActiveConnection, remoteBase, type ConnectionWithKey } from "./connections";
 import type {
   Actor,
   ApiKey,
@@ -17,9 +17,12 @@ import type {
  * they call /api/*, which http.ts proxies transparently. */
 
 async function remoteGet<T>(c: ConnectionWithKey, path: string): Promise<T> {
-  const res = await fetch(`http://${c.host}:${c.port}${path}`, {
+  const res = await fetch(`${remoteBase(c)}${path}`, {
     headers: c.apiKey ? { "x-api-key": c.apiKey } : undefined,
     cache: "no-store",
+    // Never follow a redirect from the remote - it could point this server-side
+    // read at an internal URL (SSRF). A genuine remote never redirects /api.
+    redirect: "error",
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) {

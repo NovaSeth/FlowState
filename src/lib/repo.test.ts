@@ -1015,6 +1015,41 @@ describe("Repo - API key grants (multi-target)", () => {
     expect(mintAsRead([{ projectId: pA1, scope: "read" }]).scope).toBe("read");
   });
 
+  it("a non-admin key cannot mint a key bound to ANOTHER existing actor (priv-esc)", () => {
+    // Victim: a higher-privileged key owned by a different actor.
+    const victim = repo.createApiKey({
+      actorName: "victim",
+      grants: [{ solutionId: solA, scope: "write" }],
+    });
+    // Attacker: a scoped write key (its own actor).
+    const attacker = repo.createApiKey({
+      actorName: "attacker",
+      grants: [{ solutionId: solA, scope: "write" }],
+    });
+    // Attacker tries to mint a decoy bound to the victim's actor -> 403, so the
+    // decoy can never authenticate AS the victim and reveal/revoke its keys.
+    expect403(() =>
+      runWithContext(
+        { keyId: attacker.id, actorId: attacker.actorId, keyGrants: attacker.grants },
+        () =>
+          repo.createApiKey({
+            actorId: victim.actorId,
+            grants: [{ solutionId: solA, scope: "write" }],
+          }),
+      ),
+    );
+    // But minting for its OWN actor still works.
+    const own = runWithContext(
+      { keyId: attacker.id, actorId: attacker.actorId, keyGrants: attacker.grants },
+      () =>
+        repo.createApiKey({
+          actorId: attacker.actorId,
+          grants: [{ solutionId: solA, scope: "read" }],
+        }),
+    );
+    expect(own.actorId).toBe(attacker.actorId);
+  });
+
   it("legacy keys (no grants column) behave as one solution grant", () => {
     const legacy = repo.createApiKey({ actorName: "old", solutionId: solA });
     expect(legacy.grants).toEqual([{ solutionId: solA, scope: "write" }]);

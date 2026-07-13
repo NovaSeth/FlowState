@@ -7,6 +7,8 @@ import { safeEqual } from "@/lib/auth";
 import {
   getActiveConnection,
   requireKeyEnabled,
+  requireKeyForced,
+  remoteBase,
   type ConnectionWithKey,
 } from "@/lib/connections";
 
@@ -113,11 +115,18 @@ export async function readJson(req: Request): Promise<unknown> {
   if (!text || text.trim() === "") {
     throw new AppError(400, "Invalid JSON body");
   }
+  let parsed: unknown;
   try {
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
     throw new AppError(400, "Invalid JSON body");
   }
+  // Every handler expects a JSON object (or array for bulk); reject a bare
+  // `null`/primitive so downstream `body.foo` access can't crash with a 500.
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new AppError(400, "Invalid JSON body (expected an object)");
+  }
+  return parsed;
 }
 
 /**
@@ -163,7 +172,7 @@ function isTrustedKeylessClient(req: Request): boolean {
  * - token = actor key: returns actorId/keyId (resolveApiKey throws 401 when
  *   revoked/expired, returns null on a bad secret -> 401 here).
  */
-function resolveContext(req: Request): RequestContext {
+export function resolveContext(req: Request): RequestContext {
   const token = req.headers.get("x-api-key");
   // FS_API_KEY: admin/bootstrap key (Flow State).
   const admin = process.env.FS_API_KEY ?? "";
@@ -178,10 +187,16 @@ function resolveContext(req: Request): RequestContext {
     if (!isTrustedKeylessClient(req)) {
       throw new AppError(401, "Missing x-api-key header");
     }
-    // Require-key mode (Settings): even the trusted local clients must present
-    // a key on data routes. The settings/connections endpoints stay reachable
-    // keyless so the mode can always be inspected and turned off (no lockout).
-    if (requireKeyEnabled() && !isManagementPath(req)) {
+    // Require-key mode: even the trusted local clients must present a key on
+    // data routes. When enabled via the Settings TOGGLE (local), the
+    // settings/connections endpoints stay reachable keyless so the mode can
+    // always be inspected and turned off (no lockout). When FORCED by the
+    // environment (FS_REQUIRE_KEY, for a public host) nothing is exempt, so an
+    // anonymous visitor can neither read data nor disable the protection.
+    if (
+      requireKeyEnabled() &&
+      !(isManagementPath(req) && !requireKeyForced())
+    ) {
       throw new AppError(401, "API key required (require-key mode is on)");
     }
     if (mutating && (hasAdmin || strict)) {
@@ -202,6 +217,29 @@ function resolveContext(req: Request): RequestContext {
     keyId: resolved.keyId,
     keyGrants: resolved.grants,
   };
+}
+
+/**
+ * Auth gate for the SSE event stream (/api/events). Same trust model as
+ * resolveContext, with ONE deliberate difference: a browser EventSource cannot
+ * attach an x-api-key header, so a TRUSTED KEYLESS same-origin client (the local
+ * dashboard / menu-bar app) is allowed to read the stream even in require-key
+ * mode. That keeps live refresh working on a public host - otherwise the
+ * header-less EventSource would 401 forever and the dashboard would wedge on its
+ * offline overlay. The actual disclosure risk (an anonymous NON-browser client
+ * such as curl or the MCP server) is still rejected here exactly as everywhere
+ * else, and the stream only ever carries change METADATA ("PATCH /api/tasks/<id>"),
+ * never record content or keys. A presented key is validated as usual.
+ */
+export function authorizeEventStream(req: Request): void {
+  const token = req.headers.get("x-api-key");
+  if (token) {
+    resolveContext(req); // validates the key (throws 401/403 on a bad/unauthorized one)
+    return;
+  }
+  if (!isTrustedKeylessClient(req)) {
+    throw new AppError(401, "Missing x-api-key header");
+  }
 }
 
 /** Map a thrown value to an HTTP Response. */
@@ -230,6 +268,27 @@ function isManagementPath(req: Request): boolean {
 }
 
 /**
+ * The connection/settings management surface controls the WHOLE server's data
+ * plane: a saved connection drives server-side outbound fetches (SSRF-capable),
+ * and once one is activated every data route is transparently proxied to that
+ * remote. That authority must never be reachable by a narrowly-scoped actor key
+ * - a "write one project" grant could otherwise repoint the entire instance at
+ * an attacker's host. Only the local OWNER may manage it: the trusted keyless
+ * dashboard / menu-bar (an empty context that already cleared resolveContext) or
+ * the admin key (FS_API_KEY). A resolved actor key - even with a write grant -
+ * is rejected with 403.
+ */
+export function requireManagementAuthority(ctx: RequestContext): void {
+  if (ctx.admin === true) return;
+  // Trusted keyless local owner: resolveContext returned {} (no actor, no key).
+  if (ctx.actorId === undefined && ctx.keyId === undefined) return;
+  throw new AppError(
+    403,
+    "Managing connections and settings requires admin authority",
+  );
+}
+
+/**
  * Transparent proxy for the active remote source: same method/path/query/body,
  * with the connection's stored key attached. The remote instance does its own
  * authorization; its JSON (including errors) is passed through verbatim.
@@ -239,13 +298,24 @@ async function proxyToRemote(
   c: ConnectionWithKey,
 ): Promise<Response> {
   const url = new URL(req.url);
-  const target = `http://${c.host}:${c.port}${url.pathname}${url.search}`;
+  const target = `${remoteBase(c)}${url.pathname}${url.search}`;
   const headers: Record<string, string> = {
     "content-type": req.headers.get("content-type") ?? "application/json",
   };
   if (c.apiKey) headers["x-api-key"] = c.apiKey;
-  const init: RequestInit = { method: req.method, headers };
-  if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.text();
+  // redirect:"error" - a legitimate Flow State /api never 3xx-redirects, and
+  // following one would let a malicious remote bounce this fetch to an internal
+  // URL (e.g. cloud metadata) whose body we would then hand back to the caller.
+  const init: RequestInit = { method: req.method, headers, redirect: "error" };
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const body = await req.text();
+    // Same body-size guard as readJson, so a huge payload can't be relayed to
+    // the remote through the proxy path (which bypasses readJson).
+    if (Buffer.byteLength(body, "utf8") > MAX_BODY_BYTES) {
+      throw new AppError(413, "Request body too large");
+    }
+    init.body = body;
+  }
   let res: Response;
   try {
     res = await fetch(target, init);
@@ -282,6 +352,12 @@ export function route(fn: Handler) {
       // under tests. Admin (FS_API_KEY) is not exempt - the limit is generous.
       if (rateLimited(rateKey(req, reqCtx.keyId))) {
         return json({ error: "Too many requests" }, 429);
+      }
+      // Owner-only management surface: registering/activating a connection or
+      // flipping settings controls the whole data plane, so a scoped actor key
+      // must not reach it (only admin or the trusted keyless local owner).
+      if (MUTATING.has(req.method) && isManagementPath(req)) {
+        requireManagementAuthority(reqCtx);
       }
       // Remote source active: every data route becomes a transparent proxy to
       // the connected instance (management endpoints stay local). The local

@@ -1891,6 +1891,21 @@ export class Repo {
     return !!child.projectId && child.projectId === parent.projectId;
   }
 
+  /** True when the CURRENT caller holds at least the grants of `targetGrants`
+   *  (every target grant is covered by one of the caller's). Admin and the
+   *  unrestricted local operator (no keyId) always qualify. Used to gate the
+   *  reveal/revoke "same actor" branch so a bare actor match cannot expose or
+   *  revoke a sibling key that carries wider rights than the caller holds. */
+  private callerCoversGrants(targetGrants: KeyGrant[]): boolean {
+    const ctx = currentContext();
+    if (ctx.admin === true || !ctx.keyId) return true;
+    const caller = this.getApiKey(ctx.keyId);
+    if (!caller) return false;
+    return targetGrants.every((tg) =>
+      caller.grants.some((cg) => this.grantCoversGrant(cg, tg)),
+    );
+  }
+
   /**
    * Creates an API key for exactly one actor: provide `actorId` (existing) OR
    * `actorName` (creates a new agent user). The secret is hashed; the full
@@ -1900,9 +1915,20 @@ export class Repo {
    * non-admin key may not grant access broader or longer-lived than it holds.
    */
   createApiKey(input: CreateApiKeyInput): ApiKeyWithSecret {
+    const callerCtx = currentContext();
     let actorId = optionalString(input.actorId, "actorId");
     if (actorId) {
       if (!this.getActor(actorId)) throw notFound("actor");
+      // Privilege containment: a non-admin key-authenticated caller may bind a
+      // new key only to ITS OWN actor. Binding to another EXISTING actor would
+      // mint a token that authenticates AS that actor, and could then be used to
+      // reveal or revoke that actor's other (possibly higher-privileged) keys.
+      // Minting for a brand-new actor (via actorName, below) stays allowed - a
+      // fresh actor owns no other keys. Admin and the local operator (no keyId)
+      // are unrestricted.
+      if (callerCtx.keyId && callerCtx.admin !== true && actorId !== callerCtx.actorId) {
+        throw new AppError(403, "A key can only mint keys for its own actor");
+      }
     } else {
       const actorName = requireString(
         input.actorName,
@@ -2014,7 +2040,9 @@ export class Repo {
       ctx.admin === true ||
       (!ctx.keyId && !ctx.actorId) ||
       ctx.keyId === existing.id ||
-      (!!existing.actorId && existing.actorId === ctx.actorId);
+      (!!existing.actorId &&
+        existing.actorId === ctx.actorId &&
+        this.callerCoversGrants(existing.grants));
     if (!authorized) {
       throw new AppError(403, "Not authorized to read this key's token");
     }
@@ -2071,7 +2099,9 @@ export class Repo {
       ctx.admin === true ||
       (!ctx.keyId && !ctx.actorId) ||
       ctx.keyId === existing.id ||
-      (!!existing.actorId && existing.actorId === ctx.actorId);
+      (!!existing.actorId &&
+        existing.actorId === ctx.actorId &&
+        this.callerCoversGrants(existing.grants));
     if (!authorized) {
       throw new AppError(403, "Not authorized to revoke this key");
     }
