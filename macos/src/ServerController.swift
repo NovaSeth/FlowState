@@ -24,9 +24,11 @@ enum ServerState {
 /// The server runs as its own launchd LaunchAgent (`com.flowstate.server`): started
 /// at login, kept alive by launchd, and completely separate from this app. This app
 /// is a CLIENT - it probes the server over HTTP for status and can ask launchd to
-/// start/stop/restart the agent, but it never owns the server as a child process and
-/// never stops it on quit. The server therefore survives the app crashing, quitting
-/// or being rebuilt/re-signed.
+/// start/stop/restart the agent, and it never owns the server as a child process. An
+/// intentional Quit stops the agent too, so quitting is a full shutdown of the whole
+/// Flow State stack (this app window + menu-bar + the server). The server still
+/// survives the app CRASHING or being rebuilt/re-signed, since neither of those runs
+/// applicationWillTerminate.
 ///
 /// Why a LaunchAgent + Full Disk Access: the repo lives under ~/Documents, which is
 /// TCC-protected; a launchd agent must be granted Full Disk Access on `node` to read

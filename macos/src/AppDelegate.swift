@@ -96,8 +96,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // The server is an independent launchd agent and keeps running after we
-        // quit - we are only a client. Nothing to tear down here.
+        // Full shutdown on quit: tear down the whole Flow State stack, not just this
+        // client. Quitting the app (menu item, Cmd+Q, Dock) also stops the independent
+        // server agent, so nothing is left serving. (A crash/rebuild does NOT reach
+        // here, so an unexpected exit still leaves the server up.)
+        controller.stop()
     }
 
     /// Install a standard NSMainMenu so the app has a real menu bar (an "About /
@@ -226,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        menu.addItem(item("Quit Flow State (server keeps running)", #selector(quit), enabled: true))
+        menu.addItem(item("Quit Flow State & Stop Server", #selector(quit), enabled: true))
     }
 
     private func item(_ title: String, _ action: Selector?, enabled: Bool) -> NSMenuItem {
