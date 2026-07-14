@@ -50,16 +50,21 @@ export function UsersExplorer({
   initialKeys,
   initialSolutions,
   initialProjects,
+  locked = false,
 }: {
   initialActors: Actor[];
   initialKeys: ApiKey[];
   initialSolutions: SolutionRollup[];
   initialProjects: ProjectRollup[];
+  locked?: boolean;
 }) {
   const t = useT();
   const narrow = useIsNarrow();
-  const solutions = initialSolutions;
-  const projects = initialProjects;
+  // State (not props) so the require-key mount fetch below can fill them in: on a
+  // require-key host SSR sends nothing (must not leak actors/keys) and the client
+  // loads everything with its key.
+  const [solutions, setSolutions] = useState<SolutionRollup[]>(initialSolutions);
+  const [projects, setProjects] = useState<ProjectRollup[]>(initialProjects);
 
   const [actors, setActors] = useState<Actor[]>(initialActors);
   // All keys (for the counters in the actors column); the keys column filters
@@ -116,6 +121,17 @@ export function UsersExplorer({
     }
   }
   const { pushNav, goBack } = useDrillNavigation({ narrow, stepBack });
+
+  // Require-key host: SSR sent nothing (must not leak actors/keys); fetch the full
+  // identity surface on mount with the browser's key. Without one every call 401s
+  // and the columns stay empty.
+  useEffect(() => {
+    if (!locked) return;
+    api.listActors().then(setActors).catch(() => {});
+    api.listApiKeys().then(setKeys).catch(() => {});
+    api.listSolutions().then(setSolutions).catch(() => {});
+    api.listProjects().then(setProjects).catch(() => {});
+  }, [locked]);
 
   // Live: SSE triggers a refetch of the visible levels (the same hook as Explorer).
   useLiveRefresh(() => {

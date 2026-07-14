@@ -228,6 +228,16 @@ export function ColHint({ text }: { text: string }) {
   return <p className="px-3 py-4 text-xs text-fg-subtle">{text}</p>;
 }
 
+/** Same slot as ColHint, but for a failed load: a real error (e.g. a 401 in
+ *  require-key mode) must read as a problem, not as an empty column. */
+export function ColError({ text }: { text: string }) {
+  return (
+    <p role="alert" className="px-3 py-4 text-xs text-danger">
+      {text}
+    </p>
+  );
+}
+
 export function Placeholder({ hint }: { hint: string }) {
   return (
     <div className="flex flex-1 items-center justify-center bg-canvas-subtle p-8">

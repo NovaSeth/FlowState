@@ -1,5 +1,10 @@
 import { repo } from "./repo";
-import { getActiveConnection, remoteBase, type ConnectionWithKey } from "./connections";
+import {
+  getActiveConnection,
+  remoteBase,
+  requireKeyEnabled,
+  type ConnectionWithKey,
+} from "./connections";
 import type {
   Actor,
   ApiKey,
@@ -14,7 +19,16 @@ import type {
 /* Read-side data source for the SERVER-RENDERED pages: the local repo by
  * default, or - when a remote connection is active - the remote instance over
  * the same REST payloads the API serves. Client components need none of this:
- * they call /api/*, which http.ts proxies transparently. */
+ * they call /api/*, which http.ts proxies transparently.
+ *
+ * SECURITY - require-key mode: SSR runs before hydration and has no access to the
+ * dashboard key (it lives in the browser's localStorage, never sent with the
+ * navigation request), so it CANNOT authenticate the caller. In require-key mode
+ * the only valid authority is a key, therefore SSR must render NO data - otherwise
+ * an anonymous visitor to a public host would read solution/project/actor names
+ * straight out of the first-paint HTML, bypassing the /api key gate. Each read
+ * below returns an empty/locked shape when locked; the client then fetches the
+ * real data via /api/* with its key (unauthenticated -> 401 -> nothing shown). */
 
 async function remoteGet<T>(c: ConnectionWithKey, path: string): Promise<T> {
   const res = await fetch(`${remoteBase(c)}${path}`, {
@@ -31,12 +45,15 @@ async function remoteGet<T>(c: ConnectionWithKey, path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function getDashboard(): Promise<DashboardPayload> {
+// null in require-key mode: the client fetches the real payload on mount with its key.
+export async function getDashboard(): Promise<DashboardPayload | null> {
+  if (requireKeyEnabled()) return null;
   const c = getActiveConnection();
   return c ? remoteGet<DashboardPayload>(c, "/api/dashboard") : repo().getDashboard();
 }
 
 export async function listSolutions(): Promise<SolutionRollup[]> {
+  if (requireKeyEnabled()) return [];
   const c = getActiveConnection();
   return c ? remoteGet<SolutionRollup[]>(c, "/api/solutions") : repo().listSolutions();
 }
@@ -48,6 +65,7 @@ export async function projectPageData(id: string): Promise<{
   milestones: MilestoneRollup[];
   tasks: Task[];
 } | null> {
+  if (requireKeyEnabled()) return null;
   const c = getActiveConnection();
   if (!c) {
     const r = repo();
@@ -82,6 +100,7 @@ export async function solutionPageData(id: string): Promise<{
   solution: SolutionRollup;
   projects: ProjectRollup[];
 } | null> {
+  if (requireKeyEnabled()) return null;
   const c = getActiveConnection();
   if (!c) {
     const solution = repo().getSolutionRollup(id);
@@ -105,6 +124,8 @@ export async function usersPageData(): Promise<{
   solutions: SolutionRollup[];
   projects: ProjectRollup[];
 }> {
+  if (requireKeyEnabled())
+    return { actors: [], keys: [], solutions: [], projects: [] };
   const c = getActiveConnection();
   if (!c) {
     const r = repo();

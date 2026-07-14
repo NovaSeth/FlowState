@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DashboardPayload } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
@@ -22,13 +22,32 @@ import { useT } from "@/i18n/provider";
  * (agent or UI) refreshes the payload. Every row is a <Link>, so the screen is
  * navigable even without hydration (important for iOS under next dev).
  */
-export function Overview({ initial }: { initial: DashboardPayload }) {
+export function Overview({
+  initial,
+  locked = false,
+}: {
+  initial: DashboardPayload | null;
+  locked?: boolean;
+}) {
   const [d, setD] = useState(initial);
   const t = useT();
   const reveal = useFirstVisit();
+  // Require-key host: SSR sent no payload (no key server-side), so fetch it on
+  // mount with the browser's key. Without a valid key this 401s and the screen
+  // stays empty - nothing is leaked.
+  useEffect(() => {
+    if (locked) api.getDashboard().then(setD).catch(() => {});
+  }, [locked]);
   useLiveRefresh(() => {
     api.getDashboard().then(setD).catch(() => {});
   });
+
+  if (!d)
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center px-6">
+        <p className="text-sm text-fg-subtle">{t("explorer.loadFailed")}</p>
+      </div>
+    );
 
   return (
     <div className={`${reveal} mx-auto max-w-6xl space-y-6 px-5 py-6 sm:px-6`}>

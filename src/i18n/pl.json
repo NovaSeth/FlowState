@@ -109,6 +109,7 @@
     "noProjects": "Brak projektow. Utworz przez API.",
     "noMilestones": "Brak kamieni. Utworz przez API.",
     "noTasks": "Brak zadan w tym kamieniu. Dodaj pierwsze.",
+    "loadFailed": "Nie udalo sie zaladowac - sprawdz klucz w Ustawieniach.",
     "pickSolution": "Wybierz solucje, aby zobaczyc projekty.",
     "pickProject": "Wybierz projekt, aby zobaczyc kamienie milowe.",
     "pickMilestone": "Wybierz kamien milowy, aby zobaczyc zadania.",

@@ -55,6 +55,7 @@ import { useFlip } from "@/lib/use-flip";
 import { useFirstVisit } from "@/lib/route-visit";
 import { useT } from "@/i18n/provider";
 import {
+  ColError,
   ColHint,
   ColLoading,
   Column,
@@ -63,6 +64,7 @@ import {
   useDrillNavigation,
   withArchivedDivider,
 } from "./miller";
+import { errMessage } from "@/lib/format";
 
 type TaskView = "list" | "kanban";
 
@@ -110,8 +112,10 @@ const flipSignature = (tasks: TaskListItem[]) =>
  */
 export function Explorer({
   initialSolutions,
+  locked = false,
 }: {
   initialSolutions: SolutionRollup[];
+  locked?: boolean;
 }) {
   const t = useT();
   const reveal = useFirstVisit();
@@ -156,29 +160,74 @@ export function Explorer({
   const [loadingMilestones, setLoadingMilestones] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
 
+  // Per-column load error - so a failed fetch (e.g. a 401 on a require-key host
+  // when no dashboard key is set) surfaces as an error instead of being swallowed
+  // and rendered as a misleading "empty" column.
+  const [solutionsError, setSolutionsError] = useState<string | null>(null);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [milestonesError, setMilestonesError] = useState<string | null>(null);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+
   const narrow = useIsNarrow();
 
-  const loadSolutions = async () => setSolutions(await api.listSolutions());
+  const loadSolutions = async () => {
+    try {
+      setSolutions(await api.listSolutions());
+      setSolutionsError(null);
+    } catch (e) {
+      setSolutions([]);
+      setSolutionsError(errMessage(e, t("explorer.loadFailed")));
+    }
+  };
+  // Require-key host: the first column is empty from SSR (no key server-side);
+  // fetch the solutions on mount with the browser's key (inline so setState only
+  // runs in the async callbacks, not synchronously in the effect body).
+  useEffect(() => {
+    if (!locked) return;
+    api
+      .listSolutions()
+      .then((s) => {
+        setSolutions(s);
+        setSolutionsError(null);
+      })
+      .catch((e) => {
+        setSolutions([]);
+        setSolutionsError(errMessage(e, t("explorer.loadFailed")));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked]);
   const loadProjects = async (sid: string) => {
     setLoadingProjects(true);
+    setProjectsError(null);
     try {
       setProjects(await api.listProjects(sid));
+    } catch (e) {
+      setProjects([]);
+      setProjectsError(errMessage(e, t("explorer.loadFailed")));
     } finally {
       setLoadingProjects(false);
     }
   };
   const loadMilestones = async (pid: string) => {
     setLoadingMilestones(true);
+    setMilestonesError(null);
     try {
       setMilestones(await api.listMilestones(pid));
+    } catch (e) {
+      setMilestones([]);
+      setMilestonesError(errMessage(e, t("explorer.loadFailed")));
     } finally {
       setLoadingMilestones(false);
     }
   };
   const loadTasks = async (mid: string) => {
     setLoadingTasks(true);
+    setTasksError(null);
     try {
       setTasks(await api.listTasks(mid));
+    } catch (e) {
+      setTasks([]);
+      setTasksError(errMessage(e, t("explorer.loadFailed")));
     } finally {
       setLoadingTasks(false);
     }
@@ -192,6 +241,9 @@ export function Explorer({
     setTaskId(null);
     setMilestones([]);
     setTasks([]);
+    // Clear stale errors from the now-hidden deeper columns.
+    setMilestonesError(null);
+    setTasksError(null);
     await loadProjects(id);
   }
   async function selectProject(id: string) {
@@ -200,6 +252,7 @@ export function Explorer({
     setMsId(null);
     setTaskId(null);
     setTasks([]);
+    setTasksError(null);
     await loadMilestones(id);
   }
   async function selectMilestone(id: string) {
@@ -270,11 +323,12 @@ export function Explorer({
 
   // List of solutions; the create form is pinned below it (see solutionsCol),
   // mirroring the "add actor" CTA at the bottom of the actors column.
-  const solutionsList =
-    solutions.length === 0 ? (
-      <ColHint text={t("explorer.noSolutions")} />
-    ) : (
-      withArchivedDivider(
+  const solutionsList = solutionsError ? (
+    <ColError text={solutionsError} />
+  ) : solutions.length === 0 ? (
+    <ColHint text={t("explorer.noSolutions")} />
+  ) : (
+    withArchivedDivider(
         solutions,
         (s) => s.status === "archived",
         (s) => (
@@ -340,6 +394,8 @@ export function Explorer({
 
   const projectsList = loadingProjects ? (
     <ColLoading />
+  ) : projectsError ? (
+    <ColError text={projectsError} />
   ) : projects.length === 0 ? (
     <ColHint text={t("explorer.noProjects")} />
   ) : (
@@ -422,6 +478,8 @@ export function Explorer({
 
   const milestonesList = loadingMilestones ? (
     <ColLoading />
+  ) : milestonesError ? (
+    <ColError text={milestonesError} />
   ) : milestones.length === 0 ? (
     <ColHint text={t("explorer.noMilestones")} />
   ) : (
@@ -527,6 +585,8 @@ export function Explorer({
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {loadingTasks ? (
             <ColLoading />
+          ) : tasksError ? (
+            <ColError text={tasksError} />
           ) : visibleTasks.length === 0 ? (
             <ColHint text={t("explorer.noTasks")} />
           ) : (

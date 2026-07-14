@@ -109,6 +109,7 @@
     "noProjects": "No projects. Create one via the API.",
     "noMilestones": "No milestones. Create one via the API.",
     "noTasks": "No tasks in this milestone. Add the first one.",
+    "loadFailed": "Couldn't load - check your key in Settings.",
     "pickSolution": "Pick a solution to see its projects.",
     "pickProject": "Pick a project to see its milestones.",
     "pickMilestone": "Pick a milestone to see its tasks.",
