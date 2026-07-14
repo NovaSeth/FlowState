@@ -11,10 +11,21 @@ Use it three ways, all backed by one local server: a live **web dashboard**, a
 
 ## Screenshots
 
-![Flow State dashboard](docs/screenshot-dashboard.png)
+The **Explorer** is the heart of it: a cascading drill-down
+(Solution > Project > Milestone > Task) where each column loads on demand, so you
+can walk from the whole portfolio down to a single task, its status and priority.
 
-<!-- Maintainer/CI: add the real screenshot at docs/screenshot-dashboard.png (the
-orchestrator captures one). -->
+![Flow State Explorer - the cascading Solution > Project > Milestone > Task drill-down](docs/screenshot-explore.png)
+
+The **Overview** is the at-a-glance home: live totals, per-day activity, a "needs
+attention" feed of blocked and urgent work, and every solution's progress.
+
+![Flow State Overview dashboard](docs/screenshot-dashboard.png)
+
+<!-- Screenshots are captured from seeded demo data (npm run seed); no real data. -->
+<!-- Regenerate: seed a throwaway DB, run the server against it, screenshot /explore and /. -->
+
+> The screenshots use throwaway demo data (`npm run seed`), not anyone's real board.
 
 ## What it is
 
@@ -32,34 +43,67 @@ orchestrator captures one). -->
 
 ## Get started
 
-**Requirements:** [Node](https://nodejs.org) **24+** (the store uses `node:sqlite`,
-which is stable in Node 24) and **git**. On Node 22.12-23 it still works, but you
-must enable the SQLite module with a flag (see the note below).
+**Requirements (every OS):** [Node](https://nodejs.org) **24+** (the store uses
+`node:sqlite`, stable in Node 24) and **git**. Nothing else: the database is a
+local SQLite file created on first run, and no external services are needed.
+
+Once Node 24+ and git are installed, the steps are the **same on Linux, macOS and
+Windows**:
 
 ```bash
-# 1. Get the source from GitHub
 git clone https://github.com/NovaSeth/FlowState.git
 cd FlowState
-
-# 2. Install dependencies
 npm install
-
-# 3. Run it (the database data/fs.db is created automatically on first run)
-npm run dev                       # dev server at http://localhost:3000
+npm run dev            # dev server at http://localhost:3000
 ```
 
-Then open <http://localhost:3000>. Want demo data to look around? Run
-`npm run seed` first.
+Open <http://localhost:3000>. Want demo data to look around? Run `npm run seed`
+first. For phones / LAN (the dev server may not hydrate on iOS Safari), serve a
+production build instead: `npm run build && npm run start`.
 
-For phones / LAN (the dev server may not hydrate on iOS Safari) serve a
-production build instead:
+### Installing Node 24+ and git per OS
+
+Only *getting the prerequisites* differs between platforms; the four commands
+above do not.
+
+**Linux** (Debian / Ubuntu shown; or use [nvm](https://github.com/nvm-sh/nvm) / fnm):
 
 ```bash
-npm run build && npm run start
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+# then: git clone ... && cd FlowState && npm install && npm run dev
 ```
 
-> **On Node 22.12-23**, prefix the run commands so `node:sqlite` is enabled, e.g.
-> `NODE_OPTIONS=--experimental-sqlite npm run dev` (Node 24+ needs no flag).
+To run it as a long-lived background service, see
+[Self-hosting](#self-hosting-running-the-server-on-a-remote-host) (a `systemd`
+unit is included).
+
+**macOS** (via [Homebrew](https://brew.sh); or install Node 24+ from nodejs.org):
+
+```bash
+brew install node git
+# then: git clone ... && cd FlowState && npm install && npm run dev
+```
+
+macOS also gets a **bonus**: optional native menu-bar + dashboard apps, see
+[macOS bonus: native apps](#macos-bonus-native-apps).
+
+**Windows** (PowerShell; via [winget](https://learn.microsoft.com/windows/package-manager/)
+or [nvm-windows](https://github.com/coreybutler/nvm-windows)):
+
+```powershell
+winget install OpenJS.NodeJS.LTS Git.Git   # Node 24+ and git
+# then: git clone ... ; cd FlowState ; npm install ; npm run dev
+```
+
+`node:sqlite` works on Windows as well. To pass an environment variable for a
+single run, use PowerShell syntax, e.g. `$env:FS_REQUIRE_KEY=1; npm run start`
+(or `set FS_REQUIRE_KEY=1` in `cmd`). Everything except the native macOS apps runs
+identically on Windows.
+
+> **On Node 22.12-23** (any OS), prefix the run command so `node:sqlite` is
+> enabled: `NODE_OPTIONS=--experimental-sqlite npm run dev` (in PowerShell,
+> `$env:NODE_OPTIONS='--experimental-sqlite'; npm run dev`). Node 24+ needs no flag.
 
 ### Environment
 
@@ -98,13 +142,22 @@ mkdir -p ~/.claude/skills/using-flow-state
 cp skills/using-flow-state/SKILL.md ~/.claude/skills/using-flow-state/
 ```
 
-## macOS menu-bar app
+## macOS bonus: native apps
 
-A native (Swift / AppKit + SwiftUI) menu-bar app (`macos/`) runs the server for
-you and shows the dashboard as a **native SwiftUI window** - 1:1 with the web UI,
-talking to the same local REST + SSE API (no web view). It starts the server at
-login, shows live status via a wave icon (green running / gray stopped / amber
-transitioning), and offers Start / Stop / Restart and Open Dashboard from its menu.
+On macOS you get an **extra bonus on top of the web app**: native (Swift / AppKit
++ SwiftUI) apps in `macos/` that make Flow State feel like a first-class Mac tool.
+No web view is involved: they talk to the same local REST + SSE API as everything
+else. You get two native surfaces from one small app:
+
+- a **menu-bar status app** that runs the server for you, shows live status via a
+  wave icon (green running / gray stopped / amber transitioning), and offers
+  Start / Stop / Restart and Open Dashboard from its menu, and
+- a **native SwiftUI dashboard window** - 1:1 with the web UI (the same
+  Explorer, Overview and Users screens), rendered natively rather than in a browser.
+
+It starts the server at login, and quitting the app performs a full shutdown
+(it stops the server too). None of this is required: the web dashboard and MCP
+server are the whole product on Linux and Windows.
 
 ```bash
 macos/build.sh     # compiles macos/build/FlowState.app with swiftc (no Xcode project)
@@ -113,10 +166,12 @@ macos/install.sh   # installs the app to /Applications and the server as a launc
 
 `macos/install.sh` registers the server as an independent launchd LaunchAgent
 (`com.flowstate.server`) that starts at login and is kept alive by launchd, then
-installs the menu-bar app as a **client** of that server (it monitors and can
-Start / Stop / Restart the agent, but never owns or kills it). Because the repo
-lives under `~/Documents` (TCC-protected), the agent needs Full Disk Access
-granted to `node` once - the installer points you at the setting.
+installs the menu-bar app as a **client** of that server: it never owns the server
+as a child process (launchd does), and it monitors and can Start / Stop / Restart
+the agent. The server runs independently while the app is open; **quitting the app
+performs a full shutdown and stops the server too.** Because the repo lives under
+`~/Documents` (TCC-protected), the agent needs Full Disk Access granted to `node`
+once - the installer points you at the setting.
 
 See [macos/README.md](macos/README.md) for details.
 
